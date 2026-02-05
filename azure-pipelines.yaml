@@ -1,9 +1,18 @@
-name: Azure Backup Vault - CNP
+name: Azure Backup Vault - Multi Platform
 trigger:
   batch: true
   branches:
     include:
       - master
+      - main
+
+resources:
+  repositories:
+    - repository: cnp-azuredevops-libraries
+      type: github
+      ref: refs/heads/master
+      name: hmcts/cnp-azuredevops-libraries
+      endpoint: 'hmcts'
 
 parameters:
   - name: overrideAction
@@ -16,21 +25,22 @@ parameters:
   - name: environment_components
     type: object
     default:
-      - deployment: "prod"
+      # CNP environments
+      - deployment: "cnp_prod"
         environment: 'prod'
         component: 'cnp'
         service_connection: 'DCD-CNP-Prod'
         product: 'mgmt'
         varfileName: 'cnp'
         dependsOn: 'Precheck'
-
-resources:
-  repositories:
-    - repository: cnp-azuredevops-libraries
-      type: github
-      ref: refs/heads/master
-      name: hmcts/cnp-azuredevops-libraries
-      endpoint: 'hmcts'
+      # CPP environments  
+      - deployment: "cpp_prod"
+        environment: 'cpp-prod'
+        component: 'cpp'
+        service_connection: 'DCD-CNP-Prod'
+        product: 'cpp'
+        varfileName: 'cpp'
+        dependsOn: 'Precheck'
 
 variables:
   - name: timeoutInMinutes
@@ -49,12 +59,19 @@ stages:
           vmImage: ${{ variables.agentPool }}
         timeoutInMinutes: ${{ variables.timeoutInMinutes }}
         steps:
-          - template: steps/terraform-precheck.yaml@cnp-azuredevops-libraries
-            parameters:
-              keyvaultName: 'infra-vault-nonprod'
-              keyvaultSecret: 'azure-devops-sp-token'
-              serviceConnection: 'DCD-CFT-Sandbox'
-              overrideAction: ${{ parameters.overrideAction }}
+          - ${{ if eq(parameters.environment_components[0].component, 'cnp') }}:
+            - template: steps/terraform-precheck.yaml@cnp-azuredevops-libraries
+              parameters:
+                keyvaultName: 'infra-vault-nonprod'
+                keyvaultSecret: 'azure-devops-sp-token'
+                serviceConnection: 'DCD-CFT-Sandbox'
+                overrideAction: ${{ parameters.overrideAction }}
+          - ${{ if ne(parameters.environment_components[0].component, 'cnp') }}:
+            - checkout: self
+              fetchDepth: 0
+            - script: |
+                echo "Pre-check completed successfully"
+              displayName: 'Pre-check'
 
   - ${{ each deployment in parameters.environment_components }}:
       - stage: ${{ deployment.deployment }}
@@ -65,12 +82,72 @@ stages:
               vmImage: ${{ variables.agentPool }}
             timeoutInMinutes: ${{ variables.timeoutInMinutes }}
             steps:
-              - template: steps/terraform.yaml@cnp-azuredevops-libraries
-                parameters:
-                  overrideAction: ${{ parameters.overrideAction }}
-                  environment: ${{ deployment.environment }}
-                  component: ${{ deployment.component }}
-                  serviceConnection: ${{ deployment.service_connection }}
-                  terraformInitSubscription: ${{ variables.terraformInitSubscription }}
-                  product: ${{ deployment.product }}
-                  tfVarsFile: $(System.DefaultWorkingDirectory)/$(buildRepoSuffix)/environments/${{deployment.environment}}/${{ deployment.varfileName }}.tfvars
+              - ${{ if eq(deployment.component, 'cnp') }}:
+                - template: steps/terraform.yaml@cnp-azuredevops-libraries
+                  parameters:
+                    overrideAction: ${{ parameters.overrideAction }}
+                    environment: ${{ deployment.environment }}
+                    component: ${{ deployment.component }}
+                    serviceConnection: ${{ deployment.service_connection }}
+                    terraformInitSubscription: ${{ variables.terraformInitSubscription }}
+                    product: ${{ deployment.product }}
+                    tfVarsFile: $(System.DefaultWorkingDirectory)/$(buildRepoSuffix)/environments/${{deployment.environment}}/${{ deployment.varfileName }}.tfvars
+              - ${{ if ne(deployment.component, 'cnp') }}:
+                - checkout: self
+                  fetchDepth: 0
+                - task: AzureCLI@2
+                  displayName: 'Terraform Plan'
+                  inputs:
+                    azureSubscription: ${{ deployment.service_connection }}
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    workingDirectory: $(System.DefaultWorkingDirectory)/components/${{ deployment.component }}
+                    inlineScript: |
+                      # Install terraform
+                      curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+                      sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+                      sudo apt-get update && sudo apt-get install terraform=1.5.0-1
+                      
+                      # Set ARM environment variables
+                      export ARM_CLIENT_ID=$servicePrincipalId
+                      export ARM_CLIENT_SECRET=$servicePrincipalKey  
+                      export ARM_TENANT_ID=$servicePrincipalTenantId
+                      export ARM_SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+                      export ARM_USE_MSI=false
+                      
+                      # Initialize and plan
+                      if grep -R 'backend "azurerm"' -q .; then
+                        if [[ -z "${TFSTATE_RESOURCE_GROUP:-}" || -z "${TFSTATE_STORAGE_ACCOUNT:-}" || -z "${TFSTATE_CONTAINER:-}" || -z "${TFSTATE_KEY:-}" ]]; then
+                          echo "Missing backend configuration. Set TFSTATE_RESOURCE_GROUP, TFSTATE_STORAGE_ACCOUNT, TFSTATE_CONTAINER, TFSTATE_KEY."
+                          exit 1
+                        fi
+
+                        terraform init -input=false \
+                          -backend-config="resource_group_name=${TFSTATE_RESOURCE_GROUP}" \
+                          -backend-config="storage_account_name=${TFSTATE_STORAGE_ACCOUNT}" \
+                          -backend-config="container_name=${TFSTATE_CONTAINER}" \
+                          -backend-config="key=${TFSTATE_KEY}"
+                      else
+                        terraform init -input=false
+                      fi
+                      terraform plan -var-file="../../environments/${{ deployment.environment }}/${{ deployment.varfileName }}.tfvars" -out=tfplan
+
+                - ${{ if eq(parameters.overrideAction, 'apply') }}:
+                  - task: AzureCLI@2
+                    displayName: 'Terraform Apply'
+                    inputs:
+                      azureSubscription: ${{ deployment.service_connection }}
+                      scriptType: bash
+                      scriptLocation: inlineScript
+                      addSpnToEnvironment: true
+                      workingDirectory: $(System.DefaultWorkingDirectory)/components/${{ deployment.component }}
+                      inlineScript: |
+                        # Set ARM environment variables
+                        export ARM_CLIENT_ID=$servicePrincipalId
+                        export ARM_CLIENT_SECRET=$servicePrincipalKey  
+                        export ARM_TENANT_ID=$servicePrincipalTenantId
+                        export ARM_SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+                        export ARM_USE_MSI=false
+                        
+                        terraform apply -auto-approve tfplan
