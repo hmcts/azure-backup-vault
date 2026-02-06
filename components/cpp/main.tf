@@ -4,11 +4,17 @@
 # Module source: https://github.com/hmcts/module-terraform-azurerm-backup-vault
 # ---------------------------------------------------------------------------------------------------------------------
 
+resource "azurerm_resource_group" "vaults" {
+  name     = var.resource_group_name
+  location = var.location
+  tags     = merge(var.tags, local.common_tags)
+}
+
 module "backup_vault" {
   source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=main"
 
   name                = var.name
-  resource_group_name = var.resource_group_name
+  resource_group_name = azurerm_resource_group.vaults.name
   location            = var.location
   redundancy          = var.redundancy
   cross_region_restore_enabled = var.cross_region_restore_enabled

@@ -4,7 +4,7 @@
 
 # Required variables for CPP production
 name                = "cpp-backup-vault"
-resource_group_name = "cpp-infra-prd-rg" 
+resource_group_name = "cpp-infra-prd-rg"
 location            = "uksouth"
 
 # Production configuration - module defaults to optimal settings
