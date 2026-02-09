@@ -11,7 +11,8 @@ This repository contains Terraform configurations for provisioning Azure Recover
 ```
 azure-backup-vault/
 ├── components/
-│   └── cnp/                    # CNP platform backup vault component
+│   ├── cnp/                    # CNP platform backup vault component
+│   └── cpp/                    # CPP platform backup vault component
 │       ├── main.tf             # Resource definitions
 │       ├── variable.tf         # Variable declarations
 │       ├── output.tf           # Terraform outputs
@@ -19,8 +20,9 @@ azure-backup-vault/
 │       ├── provider.tf         # Provider configuration
 │       └── README.md           # Component documentation
 ├── environments/
-│   ├── prod/                   # Production environment (cnp.tfvars)
-│   └── sbox/                   # Sandbox/testing environment (cnp.tfvars)
+│   ├── cpp-prod/               # CPP production environment (cpp.tfvars)
+│   ├── prod/                   # CNP production environment (cnp.tfvars)
+│   └── sbox/                   # CNP sandbox environment (cnp.tfvars)
 ├── azure-pipelines.yaml        # CI/CD pipeline configuration
 ├── .terraform-version          # Terraform version constraint
 ├── CODEOWNERS                  # Code ownership rules
@@ -43,30 +45,39 @@ The CNP component creates Azure Recovery Services Vaults configured for the CNP 
 
 ## Environments
 
-### Production (`environments/prod/`)
+### CPP Production (`environments/cpp-prod/`)
 
-The production environment contains fully hardened backup vault configurations:
+The CPP production environment contains the CPP backup vault configuration only:
 
-- **Immutability**: Locked to prevent accidental policy modifications
+- **Immutability**: Unlocked for initial deployment, can be locked after validation
 - **Cross-Region Restore**: Enabled for business continuity
+- **Backup Policies**: CRIT4/5 enabled; test policy disabled
+- **Extended Retention**: P56D/P1M/P1Y
+- **Redundancy**: GeoRedundant for cross-region disaster recovery
+
+**Configuration File**: `environments/cpp-prod/cpp.tfvars`
+
+### CNP Production (`environments/prod/`)
+
+The CNP production environment contains fully hardened backup vault configurations:
+
+- **Immutability**: Unlocked for initial deployment, can be locked after validation
+- **Cross-Region Restore**: Enabled for business continuity  
 - **Backup Policies**: All PostgreSQL policies enabled (CRIT4/5 and test)
-- **Extended Retention**: Enabled for MOJ compliance
+- **Extended Retention**: Enabled for MOJ compliance (P56D/P1M/P1Y)
 - **Redundancy**: GeoRedundant for cross-region disaster recovery
 
 **Configuration File**: `environments/prod/cnp.tfvars`
 
-### Sandbox (`environments/sbox/`)
+### CNP Sandbox (`environments/sbox/`)
 
-The sandbox environment is used for testing and development purposes in non-production environments:
+The CNP sandbox environment is used for testing and validation in non-production:
 
-- **Purpose**: Testing vault creation, policy configuration, and backup restore procedures
+- **Purpose**: Testing vault creation, policy configuration, and restore procedures
 - **Simplified Configuration**: Reduced policy requirements for rapid testing
 - **Soft Delete**: Disabled to allow immediate cleanup during testing
-- **Policy Testing**: PostgreSQL policies disabled to minimize resource consumption
 
 **Configuration File**: `environments/sbox/cnp.tfvars`
-
-**Note**: Sandbox tfvars are used for testing only and should not be referenced for production deployments.
 
 ## Deployment
 
@@ -101,7 +112,7 @@ To add a new backup vault configuration:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `env` | Environment name (prod, sbox) | `prod` |
+| `env` | Environment name (prod) | `prod` |
 | `product` | Product identifier | `cnp-vault` |
 | `builtFrom` | Repository and branch reference | `hmcts/azure-backup-vault` |
 
@@ -142,7 +153,7 @@ See [components/cnp/output.tf](components/cnp/output.tf) for complete output def
 The Azure Pipelines workflow (`azure-pipelines.yaml`) provides:
 
 - **Automatic Planning**: On pull requests to evaluate infrastructure changes
-- **Multi-Environment Support**: Supports sandbox and production deployments
+- **Environment Support**: CNP production via CNP templates; CPP production via CPP templates
 - **Plan/Apply Options**: Override action parameter for different deployment strategies
 
 ## Resource Naming Convention
@@ -159,7 +170,7 @@ Example: `cnp-vault-prod` (Backup Vault for CNP in Production)
 
 All resources are automatically tagged with the following tags via the common tags module:
 
-- `Environment`: Environment name (prod, sbox)
+- `Environment`: Environment name (prod)
 - `Product`: Product identifier (cnp-vault)
 - `Managed-By`: Terraform
 - `Source`: Repository and commit reference
@@ -175,7 +186,7 @@ All resources are automatically tagged with the following tags via the common ta
 
 ### Testing Considerations
 
-Sandbox policies are simplified to support rapid testing and development without incurring unnecessary backup costs.
+CNP sandbox policies are simplified to support rapid testing and development without incurring unnecessary backup costs.
 
 ## Troubleshooting
 

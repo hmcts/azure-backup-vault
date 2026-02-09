@@ -13,6 +13,11 @@ resources:
       ref: refs/heads/master
       name: hmcts/cnp-azuredevops-libraries
       endpoint: 'hmcts'
+    - repository: cppAzureDevOpsTemplates
+      type: github
+      ref: refs/heads/main
+      name: hmcts/cpp-azure-devops-templates
+      endpoint: 'hmcts'
 
 parameters:
   - name: overrideAction
@@ -33,14 +38,6 @@ parameters:
         product: 'mgmt'
         varfileName: 'cnp'
         dependsOn: 'Precheck'
-      # CPP environments  
-      - deployment: "cpp_prod"
-        environment: 'cpp-prod'
-        component: 'cpp'
-        service_connection: 'DCD-CNP-Prod'
-        product: 'cpp'
-        varfileName: 'cpp'
-        dependsOn: 'Precheck'
 
 variables:
   - name: timeoutInMinutes
@@ -49,6 +46,24 @@ variables:
     value: ubuntu-latest
   - name: terraformInitSubscription
     value: 04d27a32-7a07-48b3-95b8-3c8691e1a263
+  - name: cppPlatform
+    value: live
+  - name: cppEnvironment
+    value: cpp-prod
+  - name: cppAgentPool
+    value: MPD-ADO-AGENTS-01
+  - name: cppTfVersion
+    value: 1.14.4
+  - name: cppAzureServiceConnection
+    value: ado_live_workload_identity
+  - name: cppVaultAdminCredentialsVarGroup
+    value: cpp-live-vault-admin
+  - name: cppTfVars
+    value: ../../environments/cpp-prod/cpp.tfvars
+  - name: cppDir
+    value: components/cpp
+  - name: cppWorkspace
+    value: cpp-prod
   - template: vars/input-variables.yaml@cnp-azuredevops-libraries
 
 stages:
@@ -92,62 +107,30 @@ stages:
                     terraformInitSubscription: ${{ variables.terraformInitSubscription }}
                     product: ${{ deployment.product }}
                     tfVarsFile: $(System.DefaultWorkingDirectory)/$(buildRepoSuffix)/environments/${{deployment.environment}}/${{ deployment.varfileName }}.tfvars
-              - ${{ if ne(deployment.component, 'cnp') }}:
-                - checkout: self
-                  fetchDepth: 0
-                - task: AzureCLI@2
-                  displayName: 'Terraform Plan'
-                  inputs:
-                    azureSubscription: ${{ deployment.service_connection }}
-                    scriptType: bash
-                    scriptLocation: inlineScript
-                    addSpnToEnvironment: true
-                    workingDirectory: $(System.DefaultWorkingDirectory)/components/${{ deployment.component }}
-                    inlineScript: |
-                      # Install terraform
-                      curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-                      sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-                      sudo apt-get update && sudo apt-get install terraform=1.5.0-1
-                      
-                      # Set ARM environment variables
-                      export ARM_CLIENT_ID=$servicePrincipalId
-                      export ARM_CLIENT_SECRET=$servicePrincipalKey  
-                      export ARM_TENANT_ID=$servicePrincipalTenantId
-                      export ARM_SUBSCRIPTION_ID=$(az account show --query id --output tsv)
-                      export ARM_USE_MSI=false
-                      
-                      # Initialize and plan
-                      if grep -R 'backend "azurerm"' -q .; then
-                        if [[ -z "${TFSTATE_RESOURCE_GROUP:-}" || -z "${TFSTATE_STORAGE_ACCOUNT:-}" || -z "${TFSTATE_CONTAINER:-}" || -z "${TFSTATE_KEY:-}" ]]; then
-                          echo "Missing backend configuration. Set TFSTATE_RESOURCE_GROUP, TFSTATE_STORAGE_ACCOUNT, TFSTATE_CONTAINER, TFSTATE_KEY."
-                          exit 1
-                        fi
 
-                        terraform init -input=false \
-                          -backend-config="resource_group_name=${TFSTATE_RESOURCE_GROUP}" \
-                          -backend-config="storage_account_name=${TFSTATE_STORAGE_ACCOUNT}" \
-                          -backend-config="container_name=${TFSTATE_CONTAINER}" \
-                          -backend-config="key=${TFSTATE_KEY}"
-                      else
-                        terraform init -input=false
-                      fi
-                      terraform plan -var-file="../../environments/${{ deployment.environment }}/${{ deployment.varfileName }}.tfvars" -out=tfplan
+  - stage: cpp_precommit
+    displayName: CPP Precommit
+    pool:
+      name: ${{ variables.cppAgentPool }}
+    jobs:
+      - job: cpp_precommit
+        steps:
+          - checkout: self
+            fetchDepth: 0
+          - template: steps/terraform/terraform-precommit.yaml@cppAzureDevOpsTemplates
+            parameters:
+              tfversion: ${{ variables.cppTfVersion }}
 
-                - ${{ if eq(parameters.overrideAction, 'apply') }}:
-                  - task: AzureCLI@2
-                    displayName: 'Terraform Apply'
-                    inputs:
-                      azureSubscription: ${{ deployment.service_connection }}
-                      scriptType: bash
-                      scriptLocation: inlineScript
-                      addSpnToEnvironment: true
-                      workingDirectory: $(System.DefaultWorkingDirectory)/components/${{ deployment.component }}
-                      inlineScript: |
-                        # Set ARM environment variables
-                        export ARM_CLIENT_ID=$servicePrincipalId
-                        export ARM_CLIENT_SECRET=$servicePrincipalKey  
-                        export ARM_TENANT_ID=$servicePrincipalTenantId
-                        export ARM_SUBSCRIPTION_ID=$(az account show --query id --output tsv)
-                        export ARM_USE_MSI=false
-                        
-                        terraform apply -auto-approve tfplan
+  - template: pipelines/terraform-ws-plan-and-apply.yaml@cppAzureDevOpsTemplates
+    parameters:
+      tfversion: ${{ variables.cppTfVersion }}
+      azureServiceConnection: ${{ variables.cppAzureServiceConnection }}
+      vaultAdminCredentialsVarGroup: ${{ variables.cppVaultAdminCredentialsVarGroup }}
+      platform: ${{ variables.cppPlatform }}
+      environment: ${{ variables.cppEnvironment }}
+      agentPool: ${{ variables.cppAgentPool }}
+      dir: ${{ variables.cppDir }}
+      terraformWorkspaceName: ${{ variables.cppWorkspace }}
+      tfvars: ${{ variables.cppTfVars }}
+      displayNamePrefix: "CPP"
+      planDependsOn: cpp_precommit

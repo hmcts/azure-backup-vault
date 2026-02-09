@@ -4,12 +4,9 @@
 # ---------------------------------------------------------------------------------------------------------------------
 
 locals {
-  # Determine the identity type based on inputs
-  identity_type = var.enable_system_assigned_identity && length(var.user_assigned_identity_ids) > 0 ? "SystemAssigned, UserAssigned" : (
-    var.enable_system_assigned_identity ? "SystemAssigned" : (
-      length(var.user_assigned_identity_ids) > 0 ? "UserAssigned" : null
-    )
-  )
+  backup_vaults = var.backup_vaults
+
+  primary_vault_key = try(keys(local.backup_vaults)[0], null)
 
   # Common tags for HMCTS resources
   common_tags = {

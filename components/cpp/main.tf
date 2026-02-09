@@ -10,31 +10,48 @@ resource "azurerm_resource_group" "vaults" {
   tags     = merge(var.tags, local.common_tags)
 }
 
-module "backup_vault" {
+module "backup_vaults" {
+  for_each = local.backup_vaults
+
   source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=main"
 
-  name                = var.name
+  name                = each.key
   resource_group_name = azurerm_resource_group.vaults.name
-  location            = var.location
-  redundancy          = var.redundancy
-  cross_region_restore_enabled = var.cross_region_restore_enabled
-  
-  # Production configuration for CPP
-  retention_duration_in_days = var.retention_duration_in_days
-  
-  # Enable system-assigned managed identity
-  enable_system_assigned_identity = var.enable_system_assigned_identity
-  
-  # Enable PostgreSQL policies for CPP systems
-  enable_postgresql_crit4_5_policy = var.enable_postgresql_crit4_5_policy
-  enable_postgresql_test_policy    = var.enable_postgresql_test_policy
-  
-  # HMCTS standard tags using module's common tag structure
-  namespace    = var.namespace
-  application  = var.application
-  environment  = var.environment
-  owner        = var.owner
-  
-  # Additional custom tags
-  tags = var.tags
+  location            = coalesce(each.value.location, var.location)
+
+  redundancy                   = try(each.value.redundancy, "GeoRedundant")
+  datastore_type               = try(each.value.datastore_type, "VaultStore")
+  immutability                 = try(each.value.immutability, "Unlocked")
+  cross_region_restore_enabled = try(each.value.cross_region_restore_enabled, true)
+  soft_delete                  = try(each.value.soft_delete, "On")
+  retention_duration_in_days   = try(each.value.retention_duration_in_days, 14)
+
+  enable_system_assigned_identity = try(each.value.enable_system_assigned_identity, true)
+  user_assigned_identity_ids      = try(each.value.user_assigned_identity_ids, [])
+
+  enable_postgresql_crit4_5_policy = try(each.value.enable_postgresql_crit4_5_policy, true)
+  enable_postgresql_test_policy    = try(each.value.enable_postgresql_test_policy, true)
+
+  crit4_5_backup_schedule            = try(each.value.crit4_5_backup_schedule, "R/2024-01-07T02:00:00+00:00/P1W")
+  crit4_5_timezone                   = try(each.value.crit4_5_timezone, "UTC")
+  crit4_5_default_retention_duration = try(each.value.crit4_5_default_retention_duration, "P56D")
+  crit4_5_enable_extended_retention  = try(each.value.crit4_5_enable_extended_retention, true)
+  crit4_5_weekly_retention_duration  = try(each.value.crit4_5_weekly_retention_duration, "P56D")
+  crit4_5_monthly_retention_duration = try(each.value.crit4_5_monthly_retention_duration, "P1M")
+  crit4_5_yearly_retention_duration  = try(each.value.crit4_5_yearly_retention_duration, "P1Y")
+
+  namespace   = var.namespace
+  costcode    = var.costcode
+  owner       = var.owner
+  application = var.application
+  environment = var.environment
+  type        = var.type
+
+  tags = merge(
+    var.tags,
+    local.common_tags,
+    {
+      name = each.key
+    }
+  )
 }
