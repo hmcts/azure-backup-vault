@@ -61,7 +61,26 @@ stages:
             deploy:
               steps:
                 - checkout: self
-                
+
+                - task: AzureCLI@2
+                  name: set_variables
+                  displayName: 'Set Terraform credentials'
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    addSpnToEnvironment: true
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo "##vso[task.setvariable variable=ARM_USE_OIDC;]true"
+                      echo "##vso[task.setvariable variable=ARM_OIDC_TOKEN;]$idToken"
+                      echo "##vso[task.setvariable variable=ARM_CLIENT_ID;]$servicePrincipalId"
+                      echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID;]$(az account show --query id -o tsv)"
+                      echo "##vso[task.setvariable variable=ARM_TENANT_ID;]$tenantId"
+                      repo_name="${BUILD_REPOSITORY_NAME##*/}"
+                      repo_dir="$SYSTEM_DEFAULTWORKINGDIRECTORY/$repo_name"
+                      echo "##vso[task.setvariable variable=repo_dir]$repo_dir"
+                      echo "Repo dir: $repo_dir"
+
                 - task: DownloadSecureFile@1
                   name: caCertificateNonlive
                   displayName: 'Download CA certificate Nonlive'
@@ -75,7 +94,7 @@ stages:
                     secureFile: 'cp-cjs-hmcts-net-ca.pem'
 
                 - script: |
-                    echo 🔄 Installing $(caCertificateNonlive.secureFilePath) and $(caCertificateLive.secureFilePath) to the trusted CA directory...
+                    echo "Installing CA certificates to the trusted CA directory..."
                     sudo chown root:root $(caCertificateNonlive.secureFilePath)
                     sudo chmod a+r $(caCertificateNonlive.secureFilePath)
                     sudo chown root:root $(caCertificateLive.secureFilePath)
@@ -88,41 +107,27 @@ stages:
                   displayName: 'Terraform Plan'
                   inputs:
                     azureSubscription: $(azureServiceConnection)
-                    addSpnToEnvironment: true
                     scriptType: bash
                     scriptLocation: inlineScript
                     inlineScript: |
-                      # Set up Terraform version
+                      cd $(repo_dir)
                       source /etc/profile.d/path.sh
                       tfenv use ${{ parameters.tfversion }}
                       echo ${{ parameters.tfversion }} > .terraform-version
                       terraform version
 
-                      # Set Azure auth variables for OIDC
-                      export ARM_USE_OIDC=true
-                      export ARM_OIDC_TOKEN=$idToken
-                      export ARM_CLIENT_ID=$servicePrincipalId
-                      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-                      export ARM_TENANT_ID=$tenantId
-
-                      # Navigate to component directory
                       cd components/cpp
+                      rm -rf .terraform
 
-                      # Initialize Terraform with backend config and OIDC auth
-                      terraform init -reconfigure \
-                        -backend-config=../../backend_config/${{ parameters.platform }}.conf \
-                        -backend-config="use_oidc=true" \
-                        -backend-config="tenant_id=$tenantId" \
-                        -backend-config="subscription_id=$(az account show --query id -o tsv)" \
-                        -backend-config="client_id=$servicePrincipalId" \
-                        -backend-config="oidc_token=$idToken"
-
-                      # Select or create workspace
+                      terraform init -backend-config=../../backend_config/${{ parameters.platform }}.conf
                       terraform workspace select cpp-prod || terraform workspace new cpp-prod
-
-                      # Run terraform plan
                       terraform plan -out=tfplan -var-file=../../environments/prod/cpp.tfvars
                   env:
+                    ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                    ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+                    ARM_TENANT_ID: $(ARM_TENANT_ID)
+                    ARM_OIDC_TOKEN: $(ARM_OIDC_TOKEN)
+                    ARM_USE_OIDC: $(ARM_USE_OIDC)
                     VAULT_ADDR: $(VAULT_ADDR)
                     VAULT_TOKEN: $(VAULT_TOKEN)
                     TF_VAR_vault_token: $(VAULT_TOKEN)
@@ -143,7 +148,25 @@ stages:
             deploy:
               steps:
                 - checkout: self
-                
+
+                - task: AzureCLI@2
+                  name: set_variables
+                  displayName: 'Set Terraform credentials'
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    addSpnToEnvironment: true
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo "##vso[task.setvariable variable=ARM_USE_OIDC;]true"
+                      echo "##vso[task.setvariable variable=ARM_OIDC_TOKEN;]$idToken"
+                      echo "##vso[task.setvariable variable=ARM_CLIENT_ID;]$servicePrincipalId"
+                      echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID;]$(az account show --query id -o tsv)"
+                      echo "##vso[task.setvariable variable=ARM_TENANT_ID;]$tenantId"
+                      repo_name="${BUILD_REPOSITORY_NAME##*/}"
+                      repo_dir="$SYSTEM_DEFAULTWORKINGDIRECTORY/$repo_name"
+                      echo "##vso[task.setvariable variable=repo_dir]$repo_dir"
+
                 - task: DownloadSecureFile@1
                   name: caCertificateNonlive
                   displayName: 'Download CA certificate Nonlive'
@@ -157,7 +180,7 @@ stages:
                     secureFile: 'cp-cjs-hmcts-net-ca.pem'
 
                 - script: |
-                    echo 🔄 Installing $(caCertificateNonlive.secureFilePath) and $(caCertificateLive.secureFilePath) to the trusted CA directory...
+                    echo "Installing CA certificates to the trusted CA directory..."
                     sudo chown root:root $(caCertificateNonlive.secureFilePath)
                     sudo chmod a+r $(caCertificateNonlive.secureFilePath)
                     sudo chown root:root $(caCertificateLive.secureFilePath)
@@ -170,40 +193,26 @@ stages:
                   displayName: 'Terraform Apply'
                   inputs:
                     azureSubscription: $(azureServiceConnection)
-                    addSpnToEnvironment: true
                     scriptType: bash
                     scriptLocation: inlineScript
                     inlineScript: |
-                      # Set up Terraform version
+                      cd $(repo_dir)
                       source /etc/profile.d/path.sh
                       tfenv use ${{ parameters.tfversion }}
                       terraform version
 
-                      # Set Azure auth variables for OIDC
-                      export ARM_USE_OIDC=true
-                      export ARM_OIDC_TOKEN=$idToken
-                      export ARM_CLIENT_ID=$servicePrincipalId
-                      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-                      export ARM_TENANT_ID=$tenantId
-
-                      # Navigate to component directory
                       cd components/cpp
+                      rm -rf .terraform
 
-                      # Initialize Terraform with backend config and OIDC auth
-                      terraform init -reconfigure \
-                        -backend-config=../../backend_config/${{ parameters.platform }}.conf \
-                        -backend-config="use_oidc=true" \
-                        -backend-config="tenant_id=$tenantId" \
-                        -backend-config="subscription_id=$(az account show --query id -o tsv)" \
-                        -backend-config="client_id=$servicePrincipalId" \
-                        -backend-config="oidc_token=$idToken"
-
-                      # Select workspace
+                      terraform init -backend-config=../../backend_config/${{ parameters.platform }}.conf
                       terraform workspace select cpp-prod
-
-                      # Run terraform apply
                       terraform apply -auto-approve -var-file=../../environments/prod/cpp.tfvars
                   env:
+                    ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                    ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+                    ARM_TENANT_ID: $(ARM_TENANT_ID)
+                    ARM_OIDC_TOKEN: $(ARM_OIDC_TOKEN)
+                    ARM_USE_OIDC: $(ARM_USE_OIDC)
                     VAULT_ADDR: $(VAULT_ADDR)
                     VAULT_TOKEN: $(VAULT_TOKEN)
                     TF_VAR_vault_token: $(VAULT_TOKEN)
