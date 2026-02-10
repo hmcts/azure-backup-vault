@@ -1,0 +1,61 @@
+# CPP Backup Vault Pipeline
+# This pipeline must run in the hmcts-cpp ADO org (https://dev.azure.com/hmcts-cpp/)
+# where CPP-specific resources (agent pools, service connections, variable groups, secure files) exist.
+name: Azure Backup Vault - CPP
+trigger: none
+pr:
+  - main
+  - master
+
+resources:
+  repositories:
+    - repository: cppAzureDevOpsTemplates
+      type: github
+      name: hmcts/cpp-azure-devops-templates
+      ref: 'main'
+      endpoint: "hmcts"
+
+parameters:
+  - name: tfversion
+    default: 1.14.4
+  - name: platform
+    values:
+      - "live"
+    default: "live"
+  - name: environment
+    type: string
+    default: "cpp-prod"
+
+variables:
+  - name: agentPool
+    value: "MPD-ADO-AGENTS-01"
+  - name: azureServiceConnection
+    value: "ado_live_workload_identity"
+  - name: vaultAdminCredentialsVarGroup
+    value: "cpp-live-vault-admin"
+
+stages:
+  - stage: precommit
+    pool:
+      name: ${{ variables.agentPool }}
+    jobs:
+      - job: pre
+        condition: eq(variables['Build.Reason'], 'PullRequest')
+        steps:
+          - template: steps/terraform/terraform-precommit.yaml@cppAzureDevOpsTemplates
+            parameters:
+              tfversion: ${{ parameters.tfversion }}
+
+  - template: pipelines/terraform-ws-plan-and-apply.yaml@cppAzureDevOpsTemplates
+    parameters:
+      tfversion: ${{ parameters.tfversion }}
+      azureServiceConnection: ${{ variables.azureServiceConnection }}
+      vaultAdminCredentialsVarGroup: ${{ variables.vaultAdminCredentialsVarGroup }}
+      platform: ${{ parameters.platform }}
+      environment: ${{ parameters.environment }}
+      agentPool: ${{ variables.agentPool }}
+      dir: components/cpp
+      terraformWorkspaceName: cpp-prod
+      tfvars: ../../environments/prod/cpp.tfvars
+      displayNamePrefix: "CPP"
+      planDependsOn: precommit

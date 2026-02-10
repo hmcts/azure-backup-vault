@@ -22,7 +22,8 @@ azure-backup-vault/
 ├── environments/
 │   ├── prod/                   # Production environment (cnp.tfvars, cpp.tfvars)
 │   └── sbox/                   # CNP sandbox environment (cnp.tfvars)
-├── azure-pipelines.yaml        # CI/CD pipeline configuration
+├── azure-pipelines.yaml        # CNP pipeline (hmcts/PlatformOperations)
+├── azure-pipelines-cpp.yaml    # CPP pipeline (hmcts-cpp org)
 ├── .terraform-version          # Terraform version constraint
 ├── CODEOWNERS                  # Code ownership rules
 └── README.md                   # This file
@@ -80,9 +81,10 @@ The CNP sandbox environment is used for testing and validation in non-production
 
 ## Deployment
 
-Deployments are carried out via the Azure DevOps pipeline [code](./azure-pipelines.yaml) from this repo.
+Deployments are carried out via Azure DevOps pipelines from this repo.
 
-**ADO Pipeline**: https://dev.azure.com/hmcts/PlatformOperations/_build?definitionId=1181&_a=summary
+- **CNP Pipeline**: https://dev.azure.com/hmcts/PlatformOperations/_build?definitionId=1181&_a=summary ([source](./azure-pipelines.yaml))
+- **CPP Pipeline**: To be registered in `https://dev.azure.com/hmcts-cpp/` ([source](./azure-pipelines-cpp.yaml))
 
 ### Adding a New Backup Vault
 
@@ -147,13 +149,25 @@ The module provides the following outputs:
 
 See [components/cnp/output.tf](components/cnp/output.tf) for complete output definitions.
 
-## CI/CD Pipeline
+## CI/CD Pipelines
 
-The Azure Pipelines workflow (`azure-pipelines.yaml`) provides:
+This repo uses **two separate pipelines** because the CNP and CPP platforms run in different Azure DevOps organisations:
 
-- **Automatic Planning**: On pull requests to evaluate infrastructure changes
-- **Environment Support**: CNP production via CNP templates; CPP production via CPP templates
+### CNP Pipeline (`azure-pipelines.yaml`)
+
+- **ADO Org**: `https://dev.azure.com/hmcts/PlatformOperations`
+- **Template**: `cnp-azuredevops-libraries`
+- **Environments**: CNP production and sandbox
 - **Plan/Apply Options**: Override action parameter for different deployment strategies
+
+### CPP Pipeline (`azure-pipelines-cpp.yaml`)
+
+- **ADO Org**: `https://dev.azure.com/hmcts-cpp/`
+- **Template**: `cpp-azure-devops-templates`
+- **Environments**: CPP production
+- **Resources**: Uses CPP-specific agent pools (`MPD-ADO-AGENTS-01`), service connections (`ado_live_workload_identity`), variable groups (`cpp-live-vault-admin`), and secure files that only exist in the hmcts-cpp org
+
+> **Note**: The CPP pipeline must be registered as a build definition in the `hmcts-cpp` ADO org. It cannot run in PlatformOperations.
 
 ## Resource Naming Convention
 
