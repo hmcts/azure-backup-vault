@@ -108,8 +108,14 @@ stages:
                       # Navigate to component directory
                       cd components/cpp
 
-                      # Initialize Terraform with backend config
-                      terraform init -backend-config=../../backend_config/${{ parameters.platform }}.conf
+                      # Initialize Terraform with backend config and OIDC auth
+                      terraform init -reconfigure \
+                        -backend-config=../../backend_config/${{ parameters.platform }}.conf \
+                        -backend-config="use_oidc=true" \
+                        -backend-config="tenant_id=$tenantId" \
+                        -backend-config="subscription_id=$(az account show --query id -o tsv)" \
+                        -backend-config="client_id=$servicePrincipalId" \
+                        -backend-config="oidc_token=$idToken"
 
                       # Select or create workspace
                       terraform workspace select cpp-prod || terraform workspace new cpp-prod
@@ -183,8 +189,14 @@ stages:
                       # Navigate to component directory
                       cd components/cpp
 
-                      # Initialize Terraform with backend config
-                      terraform init -backend-config=../../backend_config/${{ parameters.platform }}.conf
+                      # Initialize Terraform with backend config and OIDC auth
+                      terraform init -reconfigure \
+                        -backend-config=../../backend_config/${{ parameters.platform }}.conf \
+                        -backend-config="use_oidc=true" \
+                        -backend-config="tenant_id=$tenantId" \
+                        -backend-config="subscription_id=$(az account show --query id -o tsv)" \
+                        -backend-config="client_id=$servicePrincipalId" \
+                        -backend-config="oidc_token=$idToken"
 
                       # Select workspace
                       terraform workspace select cpp-prod
