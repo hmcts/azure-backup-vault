@@ -116,10 +116,10 @@ stages:
 
                       # Run terraform plan
                       terraform plan -out=tfplan -var-file=../../environments/prod/cpp.tfvars
-                    env:
-                      VAULT_ADDR: $(VAULT_ADDR)
-                      VAULT_TOKEN: $(VAULT_TOKEN)
-                      TF_VAR_vault_token: $(VAULT_TOKEN)
+                  env:
+                    VAULT_ADDR: $(VAULT_ADDR)
+                    VAULT_TOKEN: $(VAULT_TOKEN)
+                    TF_VAR_vault_token: $(VAULT_TOKEN)
 
   - stage: terraform_apply
     dependsOn: terraform_plan
@@ -191,10 +191,7 @@ stages:
 
                       # Run terraform apply
                       terraform apply -auto-approve -var-file=../../environments/prod/cpp.tfvars
-                    env:
-                      VAULT_ADDR: $(VAULT_ADDR)
-                      VAULT_TOKEN: $(VAULT_TOKEN)
-                      TF_VAR_vault_token: $(VAULT_TOKEN)
-
-      displayNamePrefix: "CPP"
-      planDependsOn: precommit
+                  env:
+                    VAULT_ADDR: $(VAULT_ADDR)
+                    VAULT_TOKEN: $(VAULT_TOKEN)
+                    TF_VAR_vault_token: $(VAULT_TOKEN)
