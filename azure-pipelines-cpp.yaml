@@ -91,8 +91,18 @@ stages:
                     scriptType: bash
                     scriptLocation: inlineScript
                     inlineScript: |
-                      export platform=${{ parameters.platform }}
-                      source $(System.DefaultWorkingDirectory)/cpp-azure-devops-templates/scripts/create_backend_container.sh
+                      set -e
+                      backend_config="$(repo_dir)/backend_config/${{ parameters.platform }}.conf"
+                      echo "Reading backend config from: $backend_config"
+                      container_name=$(grep 'container_name' "$backend_config" | awk -F'=' '{print $2}' | tr -d ' "')
+                      storage_account=$(grep 'storage_account_name' "$backend_config" | awk -F'=' '{print $2}' | tr -d ' "')
+                      echo "Container: $container_name, Storage account: $storage_account"
+                      if ! az storage container exists --name "$container_name" --account-name "$storage_account" --auth-mode login --query "exists" -o tsv | grep -q "true"; then
+                        echo "Creating container: $container_name in storage account: $storage_account"
+                        az storage container create --name "$container_name" --account-name "$storage_account" --auth-mode login --output none
+                      else
+                        echo "Container already exists: $container_name"
+                      fi
 
                 - task: DownloadSecureFile@1
                   name: caCertificateNonlive
@@ -190,8 +200,18 @@ stages:
                     scriptType: bash
                     scriptLocation: inlineScript
                     inlineScript: |
-                      export platform=${{ parameters.platform }}
-                      source $(System.DefaultWorkingDirectory)/cpp-azure-devops-templates/scripts/create_backend_container.sh
+                      set -e
+                      backend_config="$(repo_dir)/backend_config/${{ parameters.platform }}.conf"
+                      echo "Reading backend config from: $backend_config"
+                      container_name=$(grep 'container_name' "$backend_config" | awk -F'=' '{print $2}' | tr -d ' "')
+                      storage_account=$(grep 'storage_account_name' "$backend_config" | awk -F'=' '{print $2}' | tr -d ' "')
+                      echo "Container: $container_name, Storage account: $storage_account"
+                      if ! az storage container exists --name "$container_name" --account-name "$storage_account" --auth-mode login --query "exists" -o tsv | grep -q "true"; then
+                        echo "Creating container: $container_name in storage account: $storage_account"
+                        az storage container create --name "$container_name" --account-name "$storage_account" --auth-mode login --output none
+                      else
+                        echo "Container already exists: $container_name"
+                      fi
 
                 - task: DownloadSecureFile@1
                   name: caCertificateNonlive
