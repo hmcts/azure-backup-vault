@@ -20,8 +20,7 @@ azure-backup-vault/
 │       ├── provider.tf         # Provider configuration
 │       └── README.md           # Component documentation
 ├── environments/
-│   ├── cpp-prod/               # CPP production environment (cpp.tfvars)
-│   ├── prod/                   # CNP production environment (cnp.tfvars)
+│   ├── prod/                   # Production environment (cnp.tfvars, cpp.tfvars)
 │   └── sbox/                   # CNP sandbox environment (cnp.tfvars)
 ├── azure-pipelines.yaml        # CI/CD pipeline configuration
 ├── .terraform-version          # Terraform version constraint
@@ -45,9 +44,9 @@ The CNP component creates Azure Recovery Services Vaults configured for the CNP 
 
 ## Environments
 
-### CPP Production (`environments/cpp-prod/`)
+### CPP Production (`environments/prod/`)
 
-The CPP production environment contains the CPP backup vault configuration only:
+The CPP production environment contains the CPP backup vault configuration:
 
 - **Immutability**: Unlocked for initial deployment, can be locked after validation
 - **Cross-Region Restore**: Enabled for business continuity
@@ -55,7 +54,7 @@ The CPP production environment contains the CPP backup vault configuration only:
 - **Extended Retention**: P56D/P1M/P1Y
 - **Redundancy**: GeoRedundant for cross-region disaster recovery
 
-**Configuration File**: `environments/cpp-prod/cpp.tfvars`
+**Configuration File**: `environments/prod/cpp.tfvars`
 
 ### CNP Production (`environments/prod/`)
 

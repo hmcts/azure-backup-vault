@@ -1,6 +1,7 @@
 # CPP Production Backup Vault Configuration
 # This configuration deploys the backup vault for CPP production workloads
 # Uses the official HMCTS module: https://github.com/hmcts/module-terraform-azurerm-backup-vault
+# This file is used by CPP ADO templates. Source of truth: environments/prod/cpp.tfvars
 
 resource_group_name = "cpp-infra-prd-rg"
 location            = "uksouth"

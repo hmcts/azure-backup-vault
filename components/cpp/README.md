@@ -33,7 +33,7 @@ The retention configuration has been optimized based on team discussions:
 
 Deploy to production:
 ```bash
-terraform apply -var-file="../../environments/cpp-prod/cpp.tfvars"
+terraform apply -var-file="../../environments/prod/cpp.tfvars"
 ```
 
 ## Outputs

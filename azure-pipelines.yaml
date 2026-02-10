@@ -59,7 +59,7 @@ variables:
   - name: cppVaultAdminCredentialsVarGroup
     value: cpp-live-vault-admin
   - name: cppTfVars
-    value: ../../environments/cpp-prod/cpp.tfvars
+    value: ../../environments/prod/cpp.tfvars
   - name: cppDir
     value: components/cpp
   - name: cppWorkspace
