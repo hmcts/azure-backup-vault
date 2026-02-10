@@ -163,9 +163,10 @@ This repo uses **two separate pipelines** because the CNP and CPP platforms run 
 ### CPP Pipeline (`azure-pipelines-cpp.yaml`)
 
 - **ADO Org**: `https://dev.azure.com/hmcts-cpp/`
-- **Template**: `cpp-azure-devops-templates`
+- **Template**: Uses custom inline terraform steps (CPP templates not compatible with component structure)
 - **Environments**: CPP production
-- **Resources**: Uses CPP-specific agent pools (`MPD-ADO-AGENTS-01`), service connections (`ado_live_workload_identity`), variable groups (`cpp-live-vault-admin`), and secure files that only exist in the hmcts-cpp org
+- **Resources**: Uses CPP-specific agent pools (`MPD-ADO-AGENTS-01`), service connections (`ado_live_workload_identity`), variable groups (`cpp-live-vault-admin`), and secure files (`cpp-nonlive-ca.pem`, `cp-cjs-hmcts-net-ca.pem`) that only exist in the hmcts-cpp org
+- **Action Parameter**: Set `action=apply` to apply changes, defaults to `plan`
 
 > **Note**: The CPP pipeline must be registered as a build definition in the `hmcts-cpp` ADO org. It cannot run in PlatformOperations.
 

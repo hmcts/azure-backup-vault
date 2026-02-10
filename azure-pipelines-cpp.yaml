@@ -19,25 +19,24 @@ parameters:
   - name: tfversion
     default: 1.14.4
   - name: platform
-    values:
-      - "live"
     default: "live"
-  - name: environment
-    type: string
-    default: "cpp-prod"
+  - name: action
+    default: "plan"
+    values:
+      - "plan"
+      - "apply"
 
 variables:
   - name: agentPool
     value: "MPD-ADO-AGENTS-01"
   - name: azureServiceConnection
     value: "ado_live_workload_identity"
-  - name: vaultAdminCredentialsVarGroup
-    value: "cpp-live-vault-admin"
+  - group: cpp-live-vault-admin
 
 stages:
   - stage: precommit
     pool:
-      name: ${{ variables.agentPool }}
+      name: $(agentPool)
     jobs:
       - job: pre
         condition: eq(variables['Build.Reason'], 'PullRequest')
@@ -46,16 +45,156 @@ stages:
             parameters:
               tfversion: ${{ parameters.tfversion }}
 
-  - template: pipelines/terraform-ws-plan-and-apply.yaml@cppAzureDevOpsTemplates
-    parameters:
-      tfversion: ${{ parameters.tfversion }}
-      azureServiceConnection: ${{ variables.azureServiceConnection }}
-      vaultAdminCredentialsVarGroup: ${{ variables.vaultAdminCredentialsVarGroup }}
-      platform: ${{ parameters.platform }}
-      environment: ${{ parameters.environment }}
-      agentPool: ${{ variables.agentPool }}
-      dir: components/cpp
-      terraformWorkspaceName: cpp-prod
-      tfvars: ../../environments/prod/cpp.tfvars
+  - stage: terraform_plan
+    dependsOn: precommit
+    condition: succeeded()
+    pool:
+      name: $(agentPool)
+    jobs:
+      - deployment: terraform_plan_job
+        displayName: Terraform Plan - CPP
+        environment: ${{ parameters.platform }}
+        variables:
+          - group: cpp-live-vault-admin
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                
+                - task: DownloadSecureFile@1
+                  name: caCertificateNonlive
+                  displayName: 'Download CA certificate Nonlive'
+                  inputs:
+                    secureFile: 'cpp-nonlive-ca.pem'
+
+                - task: DownloadSecureFile@1
+                  name: caCertificateLive
+                  displayName: 'Download CA certificate Live'
+                  inputs:
+                    secureFile: 'cp-cjs-hmcts-net-ca.pem'
+
+                - script: |
+                    echo 🔄 Installing $(caCertificateNonlive.secureFilePath) and $(caCertificateLive.secureFilePath) to the trusted CA directory...
+                    sudo chown root:root $(caCertificateNonlive.secureFilePath)
+                    sudo chmod a+r $(caCertificateNonlive.secureFilePath)
+                    sudo chown root:root $(caCertificateLive.secureFilePath)
+                    sudo chmod a+r $(caCertificateLive.secureFilePath)
+                    sudo ln -s -t /etc/ssl/certs/ $(caCertificateNonlive.secureFilePath)
+                    sudo ln -s -t /etc/ssl/certs/ $(caCertificateLive.secureFilePath)
+                  displayName: 'Install CA certificates'
+
+                - task: AzureCLI@2
+                  displayName: 'Terraform Plan'
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    addSpnToEnvironment: true
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      # Set up Terraform version
+                      source /etc/profile.d/path.sh
+                      tfenv use ${{ parameters.tfversion }}
+                      echo ${{ parameters.tfversion }} > .terraform-version
+                      terraform version
+
+                      # Set Azure auth variables for OIDC
+                      export ARM_USE_OIDC=true
+                      export ARM_OIDC_TOKEN=$idToken
+                      export ARM_CLIENT_ID=$servicePrincipalId
+                      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                      export ARM_TENANT_ID=$tenantId
+
+                      # Navigate to component directory
+                      cd components/cpp
+
+                      # Initialize Terraform with backend config
+                      terraform init -backend-config=../../backend_config/${{ parameters.platform }}.conf
+
+                      # Select or create workspace
+                      terraform workspace select cpp-prod || terraform workspace new cpp-prod
+
+                      # Run terraform plan
+                      terraform plan -out=tfplan -var-file=../../environments/prod/cpp.tfvars
+                    env:
+                      VAULT_ADDR: $(VAULT_ADDR)
+                      VAULT_TOKEN: $(VAULT_TOKEN)
+                      TF_VAR_vault_token: $(VAULT_TOKEN)
+
+  - stage: terraform_apply
+    dependsOn: terraform_plan
+    condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
+    pool:
+      name: $(agentPool)
+    jobs:
+      - deployment: terraform_apply_job
+        displayName: Terraform Apply - CPP
+        environment: ${{ parameters.platform }}
+        variables:
+          - group: cpp-live-vault-admin
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                
+                - task: DownloadSecureFile@1
+                  name: caCertificateNonlive
+                  displayName: 'Download CA certificate Nonlive'
+                  inputs:
+                    secureFile: 'cpp-nonlive-ca.pem'
+
+                - task: DownloadSecureFile@1
+                  name: caCertificateLive
+                  displayName: 'Download CA certificate Live'
+                  inputs:
+                    secureFile: 'cp-cjs-hmcts-net-ca.pem'
+
+                - script: |
+                    echo 🔄 Installing $(caCertificateNonlive.secureFilePath) and $(caCertificateLive.secureFilePath) to the trusted CA directory...
+                    sudo chown root:root $(caCertificateNonlive.secureFilePath)
+                    sudo chmod a+r $(caCertificateNonlive.secureFilePath)
+                    sudo chown root:root $(caCertificateLive.secureFilePath)
+                    sudo chmod a+r $(caCertificateLive.secureFilePath)
+                    sudo ln -s -t /etc/ssl/certs/ $(caCertificateNonlive.secureFilePath)
+                    sudo ln -s -t /etc/ssl/certs/ $(caCertificateLive.secureFilePath)
+                  displayName: 'Install CA certificates'
+
+                - task: AzureCLI@2
+                  displayName: 'Terraform Apply'
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    addSpnToEnvironment: true
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      # Set up Terraform version
+                      source /etc/profile.d/path.sh
+                      tfenv use ${{ parameters.tfversion }}
+                      terraform version
+
+                      # Set Azure auth variables for OIDC
+                      export ARM_USE_OIDC=true
+                      export ARM_OIDC_TOKEN=$idToken
+                      export ARM_CLIENT_ID=$servicePrincipalId
+                      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                      export ARM_TENANT_ID=$tenantId
+
+                      # Navigate to component directory
+                      cd components/cpp
+
+                      # Initialize Terraform with backend config
+                      terraform init -backend-config=../../backend_config/${{ parameters.platform }}.conf
+
+                      # Select workspace
+                      terraform workspace select cpp-prod
+
+                      # Run terraform apply
+                      terraform apply -auto-approve -var-file=../../environments/prod/cpp.tfvars
+                    env:
+                      VAULT_ADDR: $(VAULT_ADDR)
+                      VAULT_TOKEN: $(VAULT_TOKEN)
+                      TF_VAR_vault_token: $(VAULT_TOKEN)
+
       displayNamePrefix: "CPP"
       planDependsOn: precommit
