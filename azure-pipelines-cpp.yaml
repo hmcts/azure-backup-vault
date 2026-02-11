@@ -18,6 +18,11 @@ parameters:
     default: 1.14.4
   - name: agentPool
     default: "MPD-ADO-AGENTS-01"
+  - name: action
+    values:
+      - plan
+      - apply
+    default: plan
   - name: platform
     default: "live"
   - name: environment
@@ -41,7 +46,7 @@ stages:
               tfversion: ${{ parameters.tfversion }}
 
   - ${{ if eq(variables['Build.Reason'], 'Manual') }}:
-    - template: pipelines/terraform-ws-plan-and-apply.yaml@cppAzureDevOpsTemplates
+    - template: stages/terraform-ws-plan.yaml@cppAzureDevOpsTemplates
       parameters:
         tfversion: ${{ parameters.tfversion }}
         azureServiceConnection: ${{ variables.azureServiceConnection }}
@@ -53,4 +58,18 @@ stages:
         dir: components/cpp
         tfvars: ../../environments/prod/cpp.tfvars
         terraformWorkspaceName: cpp-prod
-        displayNamePrefix: CPP
+        stageDisplayNamePrefix: CPP
+
+  - ${{ if and(eq(variables['Build.Reason'], 'Manual'), eq(parameters.action, 'apply')) }}:
+    - template: stages/terraform-ws-apply.yaml@cppAzureDevOpsTemplates
+      parameters:
+        tfversion: ${{ parameters.tfversion }}
+        azureServiceConnection: ${{ variables.azureServiceConnection }}
+        vaultAdminCredentialsVarGroup: ${{ variables.vaultAdminCredentialsVarGroup }}
+        platform: ${{ parameters.platform }}
+        environment: ${{ parameters.environment }}
+        agentPool: ${{ parameters.agentPool }}
+        dir: components/cpp
+        tfvars: ../../environments/prod/cpp.tfvars
+        terraformWorkspaceName: cpp-prod
+        stageDisplayNamePrefix: CPP
