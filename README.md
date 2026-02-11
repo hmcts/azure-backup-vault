@@ -64,7 +64,7 @@ The CNP production environment contains fully hardened backup vault configuratio
 - **Immutability**: Unlocked for initial deployment, can be locked after validation
 - **Cross-Region Restore**: Enabled for business continuity  
 - **Backup Policies**: All PostgreSQL policies enabled (CRIT4/5 and test)
-- **Extended Retention**: Enabled for MOJ compliance (P56D/P1M/P1Y)
+- **Extended Retention**: Enabled for MOJ compliance (P56D/P2M/P1Y)
 - **Redundancy**: GeoRedundant for cross-region disaster recovery
 
 **Configuration File**: `environments/prod/cnp.tfvars`
