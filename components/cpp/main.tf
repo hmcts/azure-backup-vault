@@ -37,7 +37,7 @@ module "backup_vaults" {
   crit4_5_default_retention_duration = try(each.value.crit4_5_default_retention_duration, "P56D")
   crit4_5_enable_extended_retention  = try(each.value.crit4_5_enable_extended_retention, true)
   crit4_5_weekly_retention_duration  = try(each.value.crit4_5_weekly_retention_duration, "P56D")
-  crit4_5_monthly_retention_duration = try(each.value.crit4_5_monthly_retention_duration, "P1M")
+  crit4_5_monthly_retention_duration = try(each.value.crit4_5_monthly_retention_duration, "P2M")
   crit4_5_yearly_retention_duration  = try(each.value.crit4_5_yearly_retention_duration, "P1Y")
 
   namespace   = var.namespace
