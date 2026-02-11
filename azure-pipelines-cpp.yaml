@@ -1,42 +1,37 @@
-# CPP Backup Vault Pipeline
-# This pipeline must run in the hmcts-cpp ADO org (https://dev.azure.com/hmcts-cpp/)
-# where CPP-specific resources (agent pools, service connections, variable groups, secure files) exist.
 name: Azure Backup Vault - CPP
-trigger: none
-pr:
-  - main
-  - master
+trigger:
+  batch: true
+  branches:
+    include:
+      - master
 
 resources:
   repositories:
-    - repository: cppAzureDevOpsTemplates
-      type: github
-      name: hmcts/cpp-azure-devops-templates
-      ref: 'main'
-      endpoint: "hmcts"
+  - repository: cppAzureDevOpsTemplates
+    type: github
+    name: hmcts/cpp-azure-devops-templates
+    ref: 'main'
+    endpoint: 'hmcts'
 
 parameters:
   - name: tfversion
     default: 1.14.4
+  - name: agentPool
+    default: "MPD-ADO-AGENTS-01"
   - name: platform
     default: "live"
-  - name: action
-    default: "plan"
-    values:
-      - "plan"
-      - "apply"
+  - name: environment
+    default: "cpp-prod"
+  - name: targetResources
+    default: null
 
 variables:
-  - name: agentPool
-    value: "MPD-ADO-AGENTS-01"
-  - name: azureServiceConnection
-    value: "ado_live_workload_identity"
-  - group: cpp-live-vault-admin
+- template: azure-pipeline-variables/${{ parameters.platform }}.yml
 
 stages:
   - stage: precommit
     pool:
-      name: $(agentPool)
+      name: ${{ parameters.agentPool }}
     jobs:
       - job: pre
         condition: eq(variables['Build.Reason'], 'PullRequest')
@@ -45,220 +40,17 @@ stages:
             parameters:
               tfversion: ${{ parameters.tfversion }}
 
-  - stage: terraform_plan
-    dependsOn: precommit
-    condition: succeeded()
-    pool:
-      name: $(agentPool)
-    jobs:
-      - deployment: terraform_plan_job
-        displayName: Terraform Plan - CPP
-        environment: ${{ parameters.platform }}
-        variables:
-          - group: cpp-live-vault-admin
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - checkout: self
-
-                - task: AzureCLI@2
-                  name: set_variables
-                  displayName: 'Set Terraform credentials'
-                  inputs:
-                    azureSubscription: $(azureServiceConnection)
-                    addSpnToEnvironment: true
-                    scriptType: bash
-                    scriptLocation: inlineScript
-                    inlineScript: |
-                      echo "##vso[task.setvariable variable=ARM_USE_OIDC;]true"
-                      echo "##vso[task.setvariable variable=ARM_OIDC_TOKEN;]$idToken"
-                      echo "##vso[task.setvariable variable=ARM_CLIENT_ID;]$servicePrincipalId"
-                      echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID;]$(az account show --query id -o tsv)"
-                      echo "##vso[task.setvariable variable=ARM_TENANT_ID;]$tenantId"
-                      repo_name="${BUILD_REPOSITORY_NAME##*/}"
-                      repo_dir="$SYSTEM_DEFAULTWORKINGDIRECTORY/$repo_name"
-                      echo "##vso[task.setvariable variable=repo_dir]$repo_dir"
-                      echo "Repo dir: $repo_dir"
-
-                - checkout: cppAzureDevOpsTemplates
-
-                - task: AzureCLI@2
-                  name: check_backend_container
-                  displayName: 'Ensure backend storage container exists'
-                  inputs:
-                    azureSubscription: $(azureServiceConnection)
-                    scriptType: bash
-                    scriptLocation: inlineScript
-                    inlineScript: |
-                      set -e
-                      backend_config="$(repo_dir)/backend_config/${{ parameters.platform }}.conf"
-                      echo "Reading backend config from: $backend_config"
-                      container_name=$(grep 'container_name' "$backend_config" | awk -F'=' '{print $2}' | tr -d ' "')
-                      storage_account=$(grep 'storage_account_name' "$backend_config" | awk -F'=' '{print $2}' | tr -d ' "')
-                      echo "Container: $container_name, Storage account: $storage_account"
-                      if ! az storage container exists --name "$container_name" --account-name "$storage_account" --auth-mode login --query "exists" -o tsv | grep -q "true"; then
-                        echo "Creating container: $container_name in storage account: $storage_account"
-                        az storage container create --name "$container_name" --account-name "$storage_account" --auth-mode login --output none
-                      else
-                        echo "Container already exists: $container_name"
-                      fi
-
-                - task: DownloadSecureFile@1
-                  name: caCertificateNonlive
-                  displayName: 'Download CA certificate Nonlive'
-                  inputs:
-                    secureFile: 'cpp-nonlive-ca.pem'
-
-                - task: DownloadSecureFile@1
-                  name: caCertificateLive
-                  displayName: 'Download CA certificate Live'
-                  inputs:
-                    secureFile: 'cp-cjs-hmcts-net-ca.pem'
-
-                - script: |
-                    echo "Installing CA certificates to the trusted CA directory..."
-                    sudo chown root:root $(caCertificateNonlive.secureFilePath)
-                    sudo chmod a+r $(caCertificateNonlive.secureFilePath)
-                    sudo chown root:root $(caCertificateLive.secureFilePath)
-                    sudo chmod a+r $(caCertificateLive.secureFilePath)
-                    sudo ln -s -t /etc/ssl/certs/ $(caCertificateNonlive.secureFilePath)
-                    sudo ln -s -t /etc/ssl/certs/ $(caCertificateLive.secureFilePath)
-                  displayName: 'Install CA certificates'
-
-                - task: AzureCLI@2
-                  displayName: 'Terraform Plan'
-                  inputs:
-                    azureSubscription: $(azureServiceConnection)
-                    scriptType: bash
-                    scriptLocation: inlineScript
-                    inlineScript: |
-                      cd $(repo_dir)
-                      source /etc/profile.d/path.sh
-                      tfenv use ${{ parameters.tfversion }}
-                      echo ${{ parameters.tfversion }} > .terraform-version
-                      terraform version
-
-                      cd components/cpp
-                      rm -rf .terraform
-
-                      terraform init -backend-config=../../backend_config/${{ parameters.platform }}.conf
-                      terraform workspace select cpp-prod || terraform workspace new cpp-prod
-                      terraform plan -out=tfplan -var-file=../../environments/prod/cpp.tfvars
-                  env:
-                    ARM_CLIENT_ID: $(ARM_CLIENT_ID)
-                    ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
-                    ARM_TENANT_ID: $(ARM_TENANT_ID)
-                    ARM_OIDC_TOKEN: $(ARM_OIDC_TOKEN)
-                    ARM_USE_OIDC: $(ARM_USE_OIDC)
-                    VAULT_ADDR: $(VAULT_ADDR)
-                    VAULT_TOKEN: $(VAULT_TOKEN)
-                    TF_VAR_vault_token: $(VAULT_TOKEN)
-
-  - stage: terraform_apply
-    dependsOn: terraform_plan
-    condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
-    pool:
-      name: $(agentPool)
-    jobs:
-      - deployment: terraform_apply_job
-        displayName: Terraform Apply - CPP
-        environment: ${{ parameters.platform }}
-        variables:
-          - group: cpp-live-vault-admin
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - checkout: self
-
-                - task: AzureCLI@2
-                  name: set_variables
-                  displayName: 'Set Terraform credentials'
-                  inputs:
-                    azureSubscription: $(azureServiceConnection)
-                    addSpnToEnvironment: true
-                    scriptType: bash
-                    scriptLocation: inlineScript
-                    inlineScript: |
-                      echo "##vso[task.setvariable variable=ARM_USE_OIDC;]true"
-                      echo "##vso[task.setvariable variable=ARM_OIDC_TOKEN;]$idToken"
-                      echo "##vso[task.setvariable variable=ARM_CLIENT_ID;]$servicePrincipalId"
-                      echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID;]$(az account show --query id -o tsv)"
-                      echo "##vso[task.setvariable variable=ARM_TENANT_ID;]$tenantId"
-                      repo_name="${BUILD_REPOSITORY_NAME##*/}"
-                      repo_dir="$SYSTEM_DEFAULTWORKINGDIRECTORY/$repo_name"
-                      echo "##vso[task.setvariable variable=repo_dir]$repo_dir"
-
-                - checkout: cppAzureDevOpsTemplates
-
-                - task: AzureCLI@2
-                  name: check_backend_container
-                  displayName: 'Ensure backend storage container exists'
-                  inputs:
-                    azureSubscription: $(azureServiceConnection)
-                    scriptType: bash
-                    scriptLocation: inlineScript
-                    inlineScript: |
-                      set -e
-                      backend_config="$(repo_dir)/backend_config/${{ parameters.platform }}.conf"
-                      echo "Reading backend config from: $backend_config"
-                      container_name=$(grep 'container_name' "$backend_config" | awk -F'=' '{print $2}' | tr -d ' "')
-                      storage_account=$(grep 'storage_account_name' "$backend_config" | awk -F'=' '{print $2}' | tr -d ' "')
-                      echo "Container: $container_name, Storage account: $storage_account"
-                      if ! az storage container exists --name "$container_name" --account-name "$storage_account" --auth-mode login --query "exists" -o tsv | grep -q "true"; then
-                        echo "Creating container: $container_name in storage account: $storage_account"
-                        az storage container create --name "$container_name" --account-name "$storage_account" --auth-mode login --output none
-                      else
-                        echo "Container already exists: $container_name"
-                      fi
-
-                - task: DownloadSecureFile@1
-                  name: caCertificateNonlive
-                  displayName: 'Download CA certificate Nonlive'
-                  inputs:
-                    secureFile: 'cpp-nonlive-ca.pem'
-
-                - task: DownloadSecureFile@1
-                  name: caCertificateLive
-                  displayName: 'Download CA certificate Live'
-                  inputs:
-                    secureFile: 'cp-cjs-hmcts-net-ca.pem'
-
-                - script: |
-                    echo "Installing CA certificates to the trusted CA directory..."
-                    sudo chown root:root $(caCertificateNonlive.secureFilePath)
-                    sudo chmod a+r $(caCertificateNonlive.secureFilePath)
-                    sudo chown root:root $(caCertificateLive.secureFilePath)
-                    sudo chmod a+r $(caCertificateLive.secureFilePath)
-                    sudo ln -s -t /etc/ssl/certs/ $(caCertificateNonlive.secureFilePath)
-                    sudo ln -s -t /etc/ssl/certs/ $(caCertificateLive.secureFilePath)
-                  displayName: 'Install CA certificates'
-
-                - task: AzureCLI@2
-                  displayName: 'Terraform Apply'
-                  inputs:
-                    azureSubscription: $(azureServiceConnection)
-                    scriptType: bash
-                    scriptLocation: inlineScript
-                    inlineScript: |
-                      cd $(repo_dir)
-                      source /etc/profile.d/path.sh
-                      tfenv use ${{ parameters.tfversion }}
-                      terraform version
-
-                      cd components/cpp
-                      rm -rf .terraform
-
-                      terraform init -backend-config=../../backend_config/${{ parameters.platform }}.conf
-                      terraform workspace select cpp-prod
-                      terraform apply -auto-approve -var-file=../../environments/prod/cpp.tfvars
-                  env:
-                    ARM_CLIENT_ID: $(ARM_CLIENT_ID)
-                    ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
-                    ARM_TENANT_ID: $(ARM_TENANT_ID)
-                    ARM_OIDC_TOKEN: $(ARM_OIDC_TOKEN)
-                    ARM_USE_OIDC: $(ARM_USE_OIDC)
-                    VAULT_ADDR: $(VAULT_ADDR)
-                    VAULT_TOKEN: $(VAULT_TOKEN)
-                    TF_VAR_vault_token: $(VAULT_TOKEN)
+  - ${{ if eq(variables['Build.Reason'], 'Manual') }}:
+    - template: pipelines/terraform-ws-plan-and-apply.yaml@cppAzureDevOpsTemplates
+      parameters:
+        tfversion: ${{ parameters.tfversion }}
+        azureServiceConnection: ${{ variables.azureServiceConnection }}
+        vaultAdminCredentialsVarGroup: ${{ variables.vaultAdminCredentialsVarGroup }}
+        platform: ${{ parameters.platform }}
+        environment: ${{ parameters.environment }}
+        agentPool: ${{ parameters.agentPool }}
+        targetResources: ${{ parameters.targetResources }}
+        dir: components/cpp
+        tfvars: ../../environments/prod/cpp.tfvars
+        terraformWorkspaceName: cpp-prod
+        displayNamePrefix: CPP
