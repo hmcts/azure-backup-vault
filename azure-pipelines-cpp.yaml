@@ -23,6 +23,12 @@ parameters:
       - plan
       - apply
     default: plan
+  - name: env
+    displayName: "Environment (prod/sbox)"
+    values:
+      - prod
+      - sbox
+    default: prod
   - name: platform
     default: "live"
   - name: environment
@@ -56,8 +62,8 @@ stages:
         agentPool: ${{ parameters.agentPool }}
         targetResources: ${{ parameters.targetResources }}
         dir: components/cpp
-        tfvars: ../../environments/prod/cpp.tfvars
-        terraformWorkspaceName: cpp-prod
+        tfvars: ../../environments/${{ parameters.env }}/cpp.tfvars
+        terraformWorkspaceName: cpp-${{ parameters.env }}
         stageDisplayNamePrefix: CPP
 
   - ${{ if and(eq(variables['Build.Reason'], 'Manual'), eq(parameters.action, 'apply')) }}:
@@ -70,6 +76,6 @@ stages:
         environment: ${{ parameters.environment }}
         agentPool: ${{ parameters.agentPool }}
         dir: components/cpp
-        tfvars: ../../environments/prod/cpp.tfvars
-        terraformWorkspaceName: cpp-prod
+        tfvars: ../../environments/${{ parameters.env }}/cpp.tfvars
+        terraformWorkspaceName: cpp-${{ parameters.env }}
         stageDisplayNamePrefix: CPP
