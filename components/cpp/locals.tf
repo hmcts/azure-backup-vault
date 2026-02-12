@@ -6,8 +6,6 @@
 locals {
   backup_vaults = var.backup_vaults
 
-  primary_vault_key = try(keys(local.backup_vaults)[0], null)
-
   # Common tags for HMCTS resources
   common_tags = {
     for k, v in {
