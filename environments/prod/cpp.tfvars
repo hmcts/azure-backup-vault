@@ -25,7 +25,7 @@ backup_vaults = {
 
 namespace   = "cpp"
 application = "backup"
-environment = "production"
+environment = "prd"
 owner       = "platops"
 costcode    = "10038"
 type        = "backup"
