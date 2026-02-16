@@ -1,0 +1,5 @@
+variables:
+- name: azureServiceConnection
+  value: "ado_live_workload_identity"
+- name: vaultAdminCredentialsVarGroup
+  value: cpp-live-vault-admin

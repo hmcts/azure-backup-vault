@@ -1,0 +1,81 @@
+name: Azure Backup Vault - CPP
+trigger:
+  batch: true
+  branches:
+    include:
+      - master
+
+resources:
+  repositories:
+  - repository: cppAzureDevOpsTemplates
+    type: github
+    name: hmcts/cpp-azure-devops-templates
+    ref: 'main'
+    endpoint: 'hmcts'
+
+parameters:
+  - name: tfversion
+    default: 1.14.4
+  - name: agentPool
+    default: "MPD-ADO-AGENTS-01"
+  - name: action
+    values:
+      - plan
+      - apply
+    default: plan
+  - name: env
+    displayName: "Environment (prod/sbox)"
+    values:
+      - prod
+      - sbox
+    default: prod
+  - name: platform
+    default: "live"
+  - name: environment
+    default: "cpp-prod"
+  - name: targetResources
+    default: null
+
+variables:
+- template: azure-pipeline-variables/${{ parameters.platform }}.yml
+
+stages:
+  - stage: precommit
+    pool:
+      name: ${{ parameters.agentPool }}
+    jobs:
+      - job: pre
+        condition: eq(variables['Build.Reason'], 'PullRequest')
+        steps:
+          - template: steps/terraform/terraform-precommit.yaml@cppAzureDevOpsTemplates
+            parameters:
+              tfversion: ${{ parameters.tfversion }}
+
+  - ${{ if eq(variables['Build.Reason'], 'Manual') }}:
+    - template: stages/terraform-ws-plan.yaml@cppAzureDevOpsTemplates
+      parameters:
+        tfversion: ${{ parameters.tfversion }}
+        azureServiceConnection: ${{ variables.azureServiceConnection }}
+        vaultAdminCredentialsVarGroup: ${{ variables.vaultAdminCredentialsVarGroup }}
+        platform: ${{ parameters.platform }}
+        environment: ${{ parameters.environment }}
+        agentPool: ${{ parameters.agentPool }}
+        targetResources: ${{ parameters.targetResources }}
+        dir: components/cpp
+        tfvars: ../../environments/${{ parameters.env }}/cpp.tfvars
+        terraformWorkspaceName: cpp-${{ parameters.env }}
+        stageDisplayNamePrefix: CPP
+
+  - ${{ if and(eq(variables['Build.Reason'], 'Manual'), eq(parameters.action, 'apply')) }}:
+    - template: stages/terraform-ws-apply.yaml@cppAzureDevOpsTemplates
+      parameters:
+        tfversion: ${{ parameters.tfversion }}
+        azureServiceConnection: ${{ variables.azureServiceConnection }}
+        vaultAdminCredentialsVarGroup: ${{ variables.vaultAdminCredentialsVarGroup }}
+        platform: ${{ parameters.platform }}
+        environment: ${{ parameters.environment }}
+        agentPool: ${{ parameters.agentPool }}
+        dir: components/cpp
+        tfvars: ../../environments/${{ parameters.env }}/cpp.tfvars
+        terraformWorkspaceName: cpp-${{ parameters.env }}
+        stageDisplayNamePrefix: CPP

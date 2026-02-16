@@ -4,6 +4,15 @@ trigger:
   branches:
     include:
       - master
+      - main
+
+resources:
+  repositories:
+    - repository: cnp-azuredevops-libraries
+      type: github
+      ref: refs/heads/master
+      name: hmcts/cnp-azuredevops-libraries
+      endpoint: 'hmcts'
 
 parameters:
   - name: overrideAction
@@ -16,21 +25,13 @@ parameters:
   - name: environment_components
     type: object
     default:
-      - deployment: "prod"
+      - deployment: "cnp_prod"
         environment: 'prod'
         component: 'cnp'
         service_connection: 'DCD-CNP-Prod'
         product: 'mgmt'
         varfileName: 'cnp'
         dependsOn: 'Precheck'
-
-resources:
-  repositories:
-    - repository: cnp-azuredevops-libraries
-      type: github
-      ref: refs/heads/master
-      name: hmcts/cnp-azuredevops-libraries
-      endpoint: 'hmcts'
 
 variables:
   - name: timeoutInMinutes
