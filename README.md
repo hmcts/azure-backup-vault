@@ -52,7 +52,7 @@ The CPP production environment contains the CPP backup vault configuration:
 - **Immutability**: Unlocked for initial deployment, can be locked after validation
 - **Cross-Region Restore**: Enabled for business continuity
 - **Backup Policies**: CRIT4/5 enabled; test policy disabled
-- **Extended Retention**: P56D/P1M/P1Y
+- **Extended Retention**: P56D/P2M/P1Y
 - **Redundancy**: GeoRedundant for cross-region disaster recovery
 
 **Configuration File**: `environments/prod/cpp.tfvars`

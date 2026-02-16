@@ -32,7 +32,7 @@ module "backup_vaults" {
   enable_postgresql_test_policy      = try(each.value.enable_postgresql_test_policy, true)
   crit4_5_enable_extended_retention  = try(each.value.crit4_5_enable_extended_retention, true)
   soft_delete                        = try(each.value.soft_delete, "On")
-  crit4_5_weekly_retention_duration  = try(each.value.crit4_5_weekly_retention_duration, "P8W")
+  crit4_5_weekly_retention_duration  = try(each.value.crit4_5_weekly_retention_duration, "P56D")
   crit4_5_monthly_retention_duration = try(each.value.crit4_5_monthly_retention_duration, "P2M")
   crit4_5_yearly_retention_duration  = try(each.value.crit4_5_yearly_retention_duration, "P1Y")
 
