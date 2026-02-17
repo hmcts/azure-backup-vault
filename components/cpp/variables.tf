@@ -43,6 +43,12 @@ variable "backup_vaults" {
     crit4_5_weekly_retention_duration  = optional(string, "P56D")
     crit4_5_monthly_retention_duration = optional(string, "P2M")
     crit4_5_yearly_retention_duration  = optional(string, "P1Y")
+
+    # RBAC - Role assignments for the vault's managed identity
+    role_assignments = optional(map(object({
+      scope                = string
+      role_definition_name = string
+    })), {})
   }))
 }
 

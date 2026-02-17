@@ -20,6 +20,21 @@ backup_vaults = {
     crit4_5_weekly_retention_duration  = "P56D"
     crit4_5_monthly_retention_duration = "P2M"
     crit4_5_yearly_retention_duration  = "P1Y"
+
+    role_assignments = {
+      "reader-RG-PRD-CCM-01" = {
+        scope                = "/subscriptions/9ab65d81-930d-4cc0-a93d-367e14676bc0/resourceGroups/RG-PRD-CCM-01"
+        role_definition_name = "Reader"
+      }
+      "reader-RG-PRP-CCM-01" = {
+        scope                = "/subscriptions/9ab65d81-930d-4cc0-a93d-367e14676bc0/resourceGroups/RG-PRP-CCM-01"
+        role_definition_name = "Reader"
+      }
+      "reader-RG-PRX-CCM-01" = {
+        scope                = "/subscriptions/9ab65d81-930d-4cc0-a93d-367e14676bc0/resourceGroups/RG-PRX-CCM-01"
+        role_definition_name = "Reader"
+      }
+    }
   }
 }
 
@@ -36,3 +51,4 @@ tags = {
   "criticality"  = "High"
   "expiresAfter" = "3000-01-01"
 }
+
