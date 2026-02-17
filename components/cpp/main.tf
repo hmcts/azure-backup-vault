@@ -40,6 +40,8 @@ module "backup_vaults" {
   crit4_5_monthly_retention_duration = try(each.value.crit4_5_monthly_retention_duration, "P2M")
   crit4_5_yearly_retention_duration  = try(each.value.crit4_5_yearly_retention_duration, "P1Y")
 
+  role_assignments = try(each.value.role_assignments, {})
+
   namespace   = var.namespace
   costcode    = var.costcode
   owner       = var.owner
