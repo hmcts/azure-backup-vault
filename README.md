@@ -22,8 +22,14 @@ azure-backup-vault/
 ├── environments/
 │   ├── prod/                   # Production environment (cnp.tfvars, cpp.tfvars)
 │   └── sbox/                   # CNP sandbox environment (cnp.tfvars)
-├── azure-pipelines.yaml        # CNP pipeline (hmcts/PlatformOperations)
-├── azure-pipelines-cpp.yaml    # CPP pipeline (hmcts-cpp org)
+├── azure-pipelines.yaml        # CNP Terraform pipeline (hmcts/PlatformOperations)
+├── azure-pipelines-cpp.yaml    # CPP Terraform pipeline (hmcts-cpp org)
+├── azure-pipelines-restore-cnp.yaml # CNP restore automation pipeline
+├── azure-pipelines-restore-cpp.yaml # CPP restore automation pipeline
+├── scripts/
+│   └── restore-postgresql-flex-from-backup-vault.sh # Shared restore automation script
+├── docs/
+│   └── postgresql-restore-automation-runbook.md # Operational runbook and testing guidance
 ├── .terraform-version          # Terraform version constraint
 ├── CODEOWNERS                  # Code ownership rules
 └── README.md                   # This file
@@ -85,6 +91,12 @@ Deployments are carried out via Azure DevOps pipelines from this repo.
 
 - **CNP Pipeline**: https://dev.azure.com/hmcts/PlatformOperations/_build?definitionId=1181&_a=summary ([source](./azure-pipelines.yaml))
 - **CPP Pipeline**: To be registered in `https://dev.azure.com/hmcts-cpp/` ([source](./azure-pipelines-cpp.yaml))
+
+Restore automation entry points:
+
+- **CNP Restore Pipeline**: register in `https://dev.azure.com/hmcts/PlatformOperations` ([source](./azure-pipelines-restore-cnp.yaml))
+- **CPP Restore Pipeline**: register in `https://dev.azure.com/hmcts-cpp/` ([source](./azure-pipelines-restore-cpp.yaml))
+- **Runbook**: [PostgreSQL Restore Automation Runbook](./docs/postgresql-restore-automation-runbook.md)
 
 ### Adding a New Backup Vault
 

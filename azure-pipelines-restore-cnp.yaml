@@ -1,0 +1,117 @@
+name: Azure Backup Vault Restore - CNP
+
+trigger: none
+pr: none
+
+variables:
+  - group: cnp-backup-vault-restore-secrets
+
+parameters:
+  - name: serviceConnection
+    type: string
+    default: DCD-CNP-Prod
+  - name: vaultResourceGroup
+    type: string
+    default: ''
+  - name: vaultName
+    type: string
+    default: ''
+  - name: backupInstanceName
+    type: string
+    default: ''
+  - name: backupInstanceFriendlyNameFilter
+    type: string
+    default: ''
+  - name: recoveryPointId
+    type: string
+    default: ''
+  - name: recoveryPointTimeUtc
+    type: string
+    default: ''
+  - name: restoreLocation
+    type: string
+    default: uksouth
+  - name: targetStorageAccount
+    type: string
+    default: ''
+  - name: targetStorageContainer
+    type: string
+    default: ''
+  - name: targetFilePrefix
+    type: string
+    default: 'restore-$(Build.BuildId)'
+  - name: restoreTimeoutMinutes
+    type: number
+    default: 240
+  - name: pollSeconds
+    type: number
+    default: 30
+  - name: runDatabaseRestore
+    type: boolean
+    default: false
+  - name: restoreRoles
+    type: boolean
+    default: true
+  - name: targetPostgresHost
+    type: string
+    default: ''
+  - name: targetPostgresAdminUser
+    type: string
+    default: ''
+  - name: targetPostgresDatabase
+    type: string
+    default: ''
+  - name: targetPostgresPort
+    type: string
+    default: '5432'
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: Restore
+    displayName: Restore PostgreSQL backup to UK South
+    jobs:
+      - job: TriggerAndTrackRestore
+        displayName: Trigger and track restore
+        timeoutInMinutes: 360
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: Execute backup-vault restore automation
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                ./scripts/restore-postgresql-flex-from-backup-vault.sh
+            env:
+              VAULT_RESOURCE_GROUP: ${{ parameters.vaultResourceGroup }}
+              VAULT_NAME: ${{ parameters.vaultName }}
+              BACKUP_INSTANCE_NAME: ${{ parameters.backupInstanceName }}
+              BACKUP_INSTANCE_FRIENDLY_NAME_FILTER: ${{ parameters.backupInstanceFriendlyNameFilter }}
+              RECOVERY_POINT_ID: ${{ parameters.recoveryPointId }}
+              RECOVERY_POINT_TIME_UTC: ${{ parameters.recoveryPointTimeUtc }}
+              RESTORE_LOCATION: ${{ parameters.restoreLocation }}
+              TARGET_STORAGE_ACCOUNT: ${{ parameters.targetStorageAccount }}
+              TARGET_STORAGE_CONTAINER: ${{ parameters.targetStorageContainer }}
+              TARGET_FILE_PREFIX: ${{ parameters.targetFilePrefix }}
+              RESTORE_TIMEOUT_MINUTES: ${{ parameters.restoreTimeoutMinutes }}
+              POLL_SECONDS: ${{ parameters.pollSeconds }}
+              RUN_DATABASE_RESTORE: ${{ parameters.runDatabaseRestore }}
+              RESTORE_ROLES: ${{ parameters.restoreRoles }}
+              TARGET_POSTGRES_HOST: ${{ parameters.targetPostgresHost }}
+              TARGET_POSTGRES_ADMIN_USER: ${{ parameters.targetPostgresAdminUser }}
+              TARGET_POSTGRES_ADMIN_PASSWORD: $(targetPostgresAdminPassword)
+              TARGET_POSTGRES_DATABASE: ${{ parameters.targetPostgresDatabase }}
+              TARGET_POSTGRES_PORT: ${{ parameters.targetPostgresPort }}
+              DRY_RUN: true
+
+          - task: PublishBuildArtifacts@1
+            displayName: Publish restore metrics and logs
+            inputs:
+              PathtoPublish: restore-output
+              ArtifactName: restore-output
+              publishLocation: Container
