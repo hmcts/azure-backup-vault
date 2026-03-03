@@ -3,8 +3,10 @@ name: Azure Backup Vault Restore - CNP
 trigger: none
 pr: none
 
-variables:
-  - group: cnp-backup-vault-restore-secrets
+# Variable group 'cnp-backup-vault-restore-secrets' must be created in ADO and linked here
+# before running with RUN_DATABASE_RESTORE=true. Contains: targetPostgresAdminPassword (secret)
+# variables:
+#   - group: cnp-backup-vault-restore-secrets
 
 parameters:
   - name: serviceConnection
