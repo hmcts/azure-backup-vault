@@ -5,7 +5,7 @@ resource_group_name = "cpp-infra-sbox-rg"
 location            = "uksouth"
 
 backup_vaults = {
-  "cpp-backup-vault-pg" = {
+  "cpp-backup-vault" = {
     location                     = "uksouth"
     redundancy                   = "GeoRedundant"
     immutability                 = "Unlocked"

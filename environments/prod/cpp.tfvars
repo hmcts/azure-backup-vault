@@ -2,11 +2,11 @@
 # This configuration deploys the backup vault for CPP production workloads
 # Uses the official HMCTS module: https://github.com/hmcts/module-terraform-azurerm-backup-vault
 
-resource_group_name = "cpp-infra-prd-rg"
+resource_group_name = "cpp-infra-prd"
 location            = "uksouth"
 
 backup_vaults = {
-  "cpp-backup-vault-pg" = {
+  "cpp-backup-vault" = {
     location                     = "uksouth"
     redundancy                   = "GeoRedundant"
     immutability                 = "Unlocked"
