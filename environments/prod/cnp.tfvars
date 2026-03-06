@@ -2,7 +2,7 @@
 
 # Backup vaults configuration with optional parameters
 backup_vaults = {
-  "cnp-backup-vault-pg" = {
+  "cnp-backup-vault" = {
     location                           = "uksouth"
     redundancy                         = "GeoRedundant" # Cross-region DR capability
     immutability                       = "Unlocked"     # Start Unlocked, can lock after validation
