@@ -15,3 +15,11 @@ provider "azurerm" {
   features {}
   resource_provider_registrations = "none"
 }
+
+# Provider for DTS-SHAREDSERVICESPTL subscription
+provider "azurerm" {
+  alias           = "sharedservicesptl"
+  subscription_id = var.sharedservicesptl_subscription_id
+  features {}
+  resource_provider_registrations = "none"
+}

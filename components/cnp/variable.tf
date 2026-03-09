@@ -13,6 +13,12 @@ variable "expiresAfter" {
   default = "3000-01-01"
 }
 
+variable "sharedservicesptl_subscription_id" {
+  description = "The subscription ID for DTS-SHAREDSERVICESPTL where managed identities are located"
+  type        = string
+  default     = "6c4d2513-a873-41b4-afdd-b05a33206631"
+}
+
 variable "backup_vaults" {
   description = "Map of backup vault configurations. See https://github.com/hmcts/module-terraform-azurerm-backup-vault for complete module documentation."
   default     = {}

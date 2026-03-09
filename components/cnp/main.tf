@@ -14,6 +14,14 @@ module "tags" {
   expiresAfter = var.expiresAfter
 }
 
+# Data source for  SDS jenkins-ptl-mi managed identity (prod only)
+data "azurerm_user_assigned_identity" "jenkins_ptl_mi" {
+  count               = var.env == "prod" ? 1 : 0
+  provider            = azurerm.sharedservicesptl
+  name                = "jenkins-ptl-mi"
+  resource_group_name = "managed-identities-ptl-rg"
+}
+
 # Module call to create backup vaults
 module "backup_vaults" {
   for_each = local.backup_vaults
@@ -42,4 +50,12 @@ module "backup_vaults" {
       name = each.key
     }
   )
+}
+
+# Role assignment for jenkins-ptl-mi on cnp-backup-vault (prod only)
+resource "azurerm_role_assignment" "jenkins_ptl_mi_contributor_cnp_vault" {
+  count                = var.env == "prod" ? 1 : 0
+  scope                = module.backup_vaults["cnp-backup-vault"].backup_vault_id
+  role_definition_name = "Contributor"
+  principal_id         = data.azurerm_user_assigned_identity.jenkins_ptl_mi[0].principal_id
 }
