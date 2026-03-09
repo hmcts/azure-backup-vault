@@ -55,7 +55,7 @@ module "backup_vaults" {
 # Role assignment for jenkins-ptl-mi on cnp-backup-vault (prod only)
 resource "azurerm_role_assignment" "jenkins_ptl_mi_contributor_cnp_vault" {
   count                = var.env == "prod" ? 1 : 0
-  scope                = module.backup_vaults["cnp-backup-vault"].id
+  scope                = module.backup_vaults["cnp-backup-vault"].backup_vault_id
   role_definition_name = "Contributor"
   principal_id         = data.azurerm_user_assigned_identity.jenkins_ptl_mi[0].principal_id
 }
