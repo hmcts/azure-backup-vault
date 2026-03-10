@@ -75,7 +75,14 @@ module "restore_storage_account" {
   account_replication_type = each.value.account_replication_type
   common_tags              = module.tags.common_tags
 
-  managed_identity_object_id = module.backup_vaults["cnp-backup-vault"].backup_vault_principal_id
+  private_link_access = {
+    backup_vault = {
+      endpoint_resource_id = module.backup_vaults[try(each.value.backup_vault_key, "cnp-backup-vault")].backup_vault_id
+      endpoint_tenant_id   = try(each.value.endpoint_tenant_id, null)
+    }
+  }
+
+  managed_identity_object_id = module.backup_vaults[try(each.value.backup_vault_key, "cnp-backup-vault")].backup_vault_principal_id
   role_assignments           = ["Storage Blob Data Contributor"]
 }
 

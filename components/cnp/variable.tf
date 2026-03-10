@@ -57,5 +57,7 @@ variable "storage_accounts" {
   type = map(object({
     account_kind             = optional(string, "StorageV2")
     account_replication_type = optional(string, "LRS")
+    backup_vault_key         = optional(string, "cnp-backup-vault")
+    endpoint_tenant_id       = optional(string)
   }))
 }

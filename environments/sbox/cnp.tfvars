@@ -20,5 +20,6 @@ storage_accounts = {
   "cnpvaultrestorations" = {
     account_kind             = "StorageV2"
     account_replication_type = "LRS"
+    backup_vault_key         = "cnp-backup-vault-test"
   }
 }
