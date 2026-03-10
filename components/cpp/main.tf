@@ -63,7 +63,7 @@ module "restore_storage_account" {
 
   source = "git::https://github.com/hmcts/cpp-module-terraform-azurerm-storage-account.git?ref=feature/private-link-access"
 
-  storage_account_name          = substr(regexreplace(lower("sa${each.key}${var.environment}"), "[^a-z0-9]", ""), 0, 24)
+  storage_account_name          = substr(replace(lower("sa${each.key}${var.environment}"), "/[^a-z0-9]/", ""), 0, 24)
   location                      = var.location
   resource_group_name           = azurerm_resource_group.vaults.name
   account_kind                  = try(each.value.account_kind, "StorageV2")
