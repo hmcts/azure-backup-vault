@@ -59,3 +59,23 @@ resource "azurerm_role_assignment" "jenkins_ptl_mi_contributor_cnp_vault" {
   role_definition_name = "Contributor"
   principal_id         = data.azurerm_user_assigned_identity.jenkins_ptl_mi[0].principal_id
 }
+
+# Module call to create storage accounts for backup restoration
+module "restore_storage_account" {
+  for_each = local.storage_accounts
+
+  source = "git@github.com:hmcts/cnp-module-storage-account?ref=4.x"
+
+  storage_account_name = substr(regexreplace(lower("${each.key}${var.env}"), "[^a-z0-9]", ""), 0, 24)
+  location             = var.location
+  resource_group_name  = azurerm_resource_group.vaults.name
+
+  env                      = lower(var.env)
+  account_kind             = each.value.account_kind
+  account_replication_type = each.value.account_replication_type
+  common_tags              = module.tags.common_tags
+
+  managed_identity_object_id = module.backup_vaults["cnp-backup-vault"].backup_vault_principal_id
+  role_assignments           = ["Storage Blob Data Contributor"]
+}
+

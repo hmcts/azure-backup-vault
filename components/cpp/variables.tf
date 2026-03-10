@@ -52,6 +52,22 @@ variable "backup_vaults" {
   }))
 }
 
+variable "storage_accounts" {
+  description = "Map of storage account configurations for vault restorations."
+  default     = {}
+  type = map(object({
+    account_kind                  = optional(string, "StorageV2")
+    replication_type              = optional(string, "LRS")
+    public_network_access_enabled = optional(bool, true)
+    default_action                = optional(string, "Deny")
+    ip_rules                      = optional(list(string), [])
+    virtual_network_subnet_ids    = optional(list(string), [])
+    bypass                        = optional(list(string), ["AzureServices"])
+    backup_vault_key              = optional(string, "cpp-backup-vault")
+    endpoint_tenant_id            = optional(string)
+  }))
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # OPTIONAL VARIABLES - Tags
 # ---------------------------------------------------------------------------------------------------------------------

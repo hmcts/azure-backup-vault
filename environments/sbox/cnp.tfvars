@@ -15,3 +15,10 @@ backup_vaults = {
     soft_delete                       = "Off"          # Soft delete disabled for sandbox
   }
 }
+
+storage_accounts = {
+  "cnpvaultrestorations" = {
+    account_kind             = "StorageV2"
+    account_replication_type = "LRS"
+  }
+}
