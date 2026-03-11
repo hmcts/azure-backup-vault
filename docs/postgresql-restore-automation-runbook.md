@@ -16,6 +16,7 @@ It covers:
 - CPP: `azure-pipelines-restore-cpp.yaml`
 
 Both are manual pipelines (no CI trigger) and support concurrent runs.
+Both expose a `dryRun` pipeline parameter (default `true`) so you can safely validate selection logic before running a real restore.
 
 ## Workflow implemented
 
@@ -61,8 +62,13 @@ Recommended non-secret runtime parameters:
 - `recoveryPointId` or `recoveryPointTimeUtc`
 - `targetStorageAccount`
 - `targetStorageContainer`
+- `dryRun` (default `true`; set `false` to execute restore)
 - `runDatabaseRestore`
 - `targetPostgresHost`, `targetPostgresAdminUser`, `targetPostgresDatabase`
+
+## Artifacts and failure handling
+
+The pipelines publish the `restore-output` artifact using `condition: always()`, so logs/metrics are retained for both successful and failed runs.
 
 ## Parallel restore testing
 
@@ -101,8 +107,22 @@ After test completion and sign-off:
 
 - Restore for PostgreSQL Flexible Server is a **restore-to-files first** flow.
 - Azure may prepend UUID-style prefixes to restored files.
-- `roles.sql` can include service-managed roles that error on replay; script treats this as non-fatal.
+- `roles.sql` can include service-managed roles that error on replay; script now filters known managed-role errors and fails on unexpected role errors.
 - Recovery point frequency and restore availability depend on backup policy execution.
+
+## Role restore hardening and logs
+
+When `restoreRoles=true` and a roles file is present, the script performs a hardened role replay process:
+
+1. Replays `roles.sql` and captures full output to `restore-output/roles-restore.log`.
+2. Extracts all `ERROR`/`FATAL` lines to `restore-output/roles-restore-errors.log`.
+3. Filters known managed-service role limitations; any remaining lines are written to `restore-output/roles-restore-critical.log`.
+
+Behavior:
+
+- If `psql` returns a non-zero exit code, the restore fails.
+- If `roles-restore-critical.log` contains lines, the restore fails.
+- If only known managed-role warnings are present, the restore continues and logs a warning.
 
 ## Evidence checklist for ticket acceptance
 

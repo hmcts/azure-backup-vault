@@ -50,6 +50,9 @@ parameters:
   - name: pollSeconds
     type: number
     default: 30
+  - name: dryRun
+    type: boolean
+    default: true
   - name: runDatabaseRestore
     type: boolean
     default: false
@@ -103,6 +106,7 @@ stages:
               TARGET_FILE_PREFIX: ${{ parameters.targetFilePrefix }}
               RESTORE_TIMEOUT_MINUTES: ${{ parameters.restoreTimeoutMinutes }}
               POLL_SECONDS: ${{ parameters.pollSeconds }}
+              DRY_RUN: ${{ parameters.dryRun }}
               RUN_DATABASE_RESTORE: ${{ parameters.runDatabaseRestore }}
               RESTORE_ROLES: ${{ parameters.restoreRoles }}
               TARGET_POSTGRES_HOST: ${{ parameters.targetPostgresHost }}
@@ -110,10 +114,10 @@ stages:
               TARGET_POSTGRES_ADMIN_PASSWORD: $(targetPostgresAdminPassword)
               TARGET_POSTGRES_DATABASE: ${{ parameters.targetPostgresDatabase }}
               TARGET_POSTGRES_PORT: ${{ parameters.targetPostgresPort }}
-              DRY_RUN: true
 
           - task: PublishBuildArtifacts@1
             displayName: Publish restore metrics and logs
+            condition: always()
             inputs:
               PathtoPublish: restore-output
               ArtifactName: restore-output

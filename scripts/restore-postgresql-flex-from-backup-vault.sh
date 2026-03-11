@@ -11,6 +11,10 @@ fail() {
   exit 1
 }
 
+warn() {
+  log "WARN: $*"
+}
+
 require_env() {
   local key="$1"
   [[ -n "${!key:-}" ]] || fail "Missing required environment variable: ${key}"
@@ -101,6 +105,27 @@ discover_roles_blob() {
     | first
     | .name // empty
   '
+}
+
+roles_restore_has_unexpected_errors() {
+  local roles_restore_log="$1"
+  local roles_errors_file="$2"
+  local roles_critical_file="$3"
+
+  grep -E '(^ERROR:|^psql:.*ERROR:|^FATAL:|^psql:.*FATAL:)' "$roles_restore_log" > "$roles_errors_file" || true
+
+  if [[ ! -s "$roles_errors_file" ]]; then
+    return 1
+  fi
+
+  # Ignore known, environment-specific role replay errors in managed PostgreSQL.
+  grep -Ev 'role ".*" already exists|must be superuser to create role|must be superuser to alter role|permission denied to create role|permission denied to alter role|cannot execute CREATE ROLE in a read-only transaction|cannot execute ALTER ROLE in a read-only transaction' "$roles_errors_file" > "$roles_critical_file" || true
+
+  if [[ -s "$roles_critical_file" ]]; then
+    return 0
+  fi
+
+  return 1
 }
 
 main() {
@@ -433,10 +458,32 @@ EOF
   fi
 
   if [[ -n "$roles_file" ]]; then
-    log "Restoring roles (non-fatal if service-managed roles fail)"
+    local roles_restore_log="restore-output/roles-restore.log"
+    local roles_errors_file="restore-output/roles-restore-errors.log"
+    local roles_critical_file="restore-output/roles-restore-critical.log"
+
+    log "Restoring roles with managed-role error filtering"
     set +e
-    psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=postgres sslmode=require" -f "$roles_file"
+    psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=postgres sslmode=require" \
+      -v ON_ERROR_STOP=0 \
+      -f "$roles_file" \
+      > "$roles_restore_log" 2>&1
+    local roles_restore_exit_code=$?
     set -e
+
+    if [[ "$roles_restore_exit_code" -ne 0 ]]; then
+      fail "roles.sql replay failed with psql exit code ${roles_restore_exit_code}. See ${roles_restore_log}."
+    fi
+
+    if roles_restore_has_unexpected_errors "$roles_restore_log" "$roles_errors_file" "$roles_critical_file"; then
+      log "Unexpected role restore errors detected:"
+      sed -n '1,20p' "$roles_critical_file"
+      fail "roles.sql replay had unexpected errors. See ${roles_critical_file}."
+    elif [[ -s "$roles_errors_file" ]]; then
+      warn "roles.sql completed with known managed-role warnings; continuing. See ${roles_errors_file}."
+    else
+      log "roles.sql replay completed without errors"
+    fi
   fi
 
   local restore_mode="pg_restore"
