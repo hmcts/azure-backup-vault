@@ -70,10 +70,11 @@ module "restore_storage_account" {
   location             = var.location
   resource_group_name  = azurerm_resource_group.vaults.name
 
-  env                      = lower(var.env)
-  account_kind             = each.value.account_kind
-  account_replication_type = each.value.account_replication_type
-  common_tags              = module.tags.common_tags
+  env                           = lower(var.env)
+  account_kind                  = each.value.account_kind
+  account_replication_type      = each.value.account_replication_type
+  common_tags                   = module.tags.common_tags
+  public_network_access_enabled = each.value.public_network_access_enabled
 
   private_link_access = {
     backup_vault = {

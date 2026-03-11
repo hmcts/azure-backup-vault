@@ -55,9 +55,10 @@ variable "storage_accounts" {
   description = "Map of storage account configurations for vault restorations. See https://github.com/hmcts/cnp-module-storage-account for complete module documentation."
   default     = {}
   type = map(object({
-    account_kind             = optional(string, "StorageV2")
-    account_replication_type = optional(string, "LRS")
-    backup_vault_key         = optional(string, "cnp-backup-vault")
-    endpoint_tenant_id       = optional(string)
+    account_kind                  = optional(string, "StorageV2")
+    account_replication_type      = optional(string, "LRS")
+    backup_vault_key              = optional(string, "cnp-backup-vault")
+    endpoint_tenant_id            = optional(string)
+    public_network_access_enabled = optional(bool, false)
   }))
 }

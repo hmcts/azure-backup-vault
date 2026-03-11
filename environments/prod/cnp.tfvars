@@ -18,8 +18,9 @@ backup_vaults = {
 
 storage_accounts = {
   "cnpvaultrestorations" = {
-    account_kind             = "StorageV2"
-    account_replication_type = "LRS"
-    backup_vault_key         = "cnp-backup-vault"
+    account_kind                  = "StorageV2"
+    account_replication_type      = "LRS"
+    backup_vault_key              = "cnp-backup-vault"
+    public_network_access_enabled = true
   }
 }
