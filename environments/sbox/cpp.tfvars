@@ -20,7 +20,7 @@ backup_vaults = {
 }
 
 storage_accounts = {
-  "cppvaultrestorations" = {
+  "cppvaultrestore" = {
     account_kind                  = "StorageV2"
     replication_type              = "LRS"
     public_network_access_enabled = true
