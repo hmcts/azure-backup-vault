@@ -38,6 +38,17 @@ backup_vaults = {
   }
 }
 
+storage_accounts = {
+  "cppvaultrestorations" = {
+    account_kind                  = "StorageV2"
+    replication_type              = "LRS"
+    public_network_access_enabled = true
+    default_action                = "Deny"
+    bypass                        = ["AzureServices"]
+    backup_vault_key              = "cpp-backup-vault"
+  }
+}
+
 namespace   = "cpp"
 application = "backup"
 environment = "prd"

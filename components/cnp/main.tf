@@ -59,3 +59,31 @@ resource "azurerm_role_assignment" "jenkins_ptl_mi_contributor_cnp_vault" {
   role_definition_name = "Contributor"
   principal_id         = data.azurerm_user_assigned_identity.jenkins_ptl_mi[0].principal_id
 }
+
+# Module call to create storage accounts for backup restoration
+module "restore_storage_account" {
+  for_each = local.storage_accounts
+
+  source = "git::https://github.com/hmcts/cnp-module-storage-account.git?ref=feature/private-link-access"
+
+  storage_account_name = substr(replace(lower("${each.key}${var.env}"), "/[^a-z0-9]/", ""), 0, 24)
+  location             = var.location
+  resource_group_name  = azurerm_resource_group.vaults.name
+
+  env                           = lower(var.env)
+  account_kind                  = each.value.account_kind
+  account_replication_type      = each.value.account_replication_type
+  common_tags                   = module.tags.common_tags
+  public_network_access_enabled = each.value.public_network_access_enabled
+
+  private_link_access = {
+    backup_vault = {
+      endpoint_resource_id = module.backup_vaults[try(each.value.backup_vault_key, "cnp-backup-vault")].backup_vault_id
+      endpoint_tenant_id   = try(each.value.endpoint_tenant_id, null)
+    }
+  }
+
+  managed_identity_object_id = module.backup_vaults[try(each.value.backup_vault_key, "cnp-backup-vault")].backup_vault_principal_id
+  role_assignments           = ["Storage Blob Data Contributor"]
+}
+

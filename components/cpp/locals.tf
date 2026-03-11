@@ -4,7 +4,8 @@
 # ---------------------------------------------------------------------------------------------------------------------
 
 locals {
-  backup_vaults = var.backup_vaults
+  backup_vaults    = var.backup_vaults
+  storage_accounts = var.storage_accounts
 
   # Common tags for HMCTS resources
   common_tags = {
