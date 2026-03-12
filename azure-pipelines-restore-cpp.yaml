@@ -23,6 +23,13 @@ parameters:
     type: string
   - name: sourceResourceGroup
     type: string
+  # Subscription ID or name where the source Postgres server lives.
+  # Leave as 'none' when the source server is in the same subscription as the
+  # service connection. Required when restoring cross-subscription (e.g. the
+  # vault is in prod but the source server is in a dev subscription).
+  - name: sourceSubscription
+    type: string
+    default: 'none'
   - name: restoredServerName
     type: string
     # 'auto' generates the name as "${sourceServerName}-restored".
@@ -231,9 +238,15 @@ stages:
                 fi
 
                 echo "Fetching source server config: ${SOURCE_SERVER_NAME} in ${SOURCE_RESOURCE_GROUP}"
+                _SOURCE_SUB_FLAG=""
+                if [[ -n "${SOURCE_SUBSCRIPTION:-}" && "${SOURCE_SUBSCRIPTION}" != "none" ]]; then
+                  _SOURCE_SUB_FLAG="--subscription ${SOURCE_SUBSCRIPTION}"
+                fi
+                # shellcheck disable=SC2086
                 SOURCE=$(az postgres flexible-server show \
                   --name "${SOURCE_SERVER_NAME}" \
                   --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                  ${_SOURCE_SUB_FLAG} \
                   -o json)
 
                 SKU_NAME=$(echo "$SOURCE"    | jq -r '.sku.name')
@@ -271,18 +284,22 @@ stages:
                   echo "  --subnet ${SUBNET_ID} \\"
                   echo "  --private-dns-zone ${DNS_ZONE_ID} \\"
                   echo "  --high-availability Disabled"
+                  [[ -n "${_SOURCE_SUB_FLAG}" ]] && echo "  ${_SOURCE_SUB_FLAG}"
                   echo "##vso[task.setvariable variable=restoredServerFqdn;isOutput=true]${EXPECTED_FQDN}"
                   exit 0
                 fi
 
+                # shellcheck disable=SC2086
                 EXISTING=$(az postgres flexible-server show \
                   --name "${RESTORED_NAME}" \
                   --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                  ${_SOURCE_SUB_FLAG} \
                   -o json 2>/dev/null || echo "")
 
                 if [[ -n "${EXISTING}" ]]; then
                   echo "Server ${RESTORED_NAME} already exists, skipping creation."
                 else
+                  # shellcheck disable=SC2086
                   az postgres flexible-server create \
                     --resource-group "${SOURCE_RESOURCE_GROUP}" \
                     --name "${RESTORED_NAME}" \
@@ -295,7 +312,8 @@ stages:
                     --private-dns-zone "${DNS_ZONE_ID}" \
                     --high-availability Disabled \
                     --admin-user "$(targetPostgresAdminUser)" \
-                    --admin-password "$(targetPostgresAdminPassword)"
+                    --admin-password "$(targetPostgresAdminPassword)" \
+                    ${_SOURCE_SUB_FLAG}
                 fi
 
                 echo "Restored server FQDN: ${EXPECTED_FQDN}"
@@ -303,6 +321,7 @@ stages:
             env:
               SOURCE_SERVER_NAME: ${{ parameters.sourceServerName }}
               SOURCE_RESOURCE_GROUP: ${{ parameters.sourceResourceGroup }}
+              SOURCE_SUBSCRIPTION: ${{ parameters.sourceSubscription }}
               RESTORED_SERVER_NAME: ${{ parameters.restoredServerName }}
               RESTORE_MODE: ${{ parameters.restoreMode }}
               DRY_RUN: ${{ parameters.dryRun }}
