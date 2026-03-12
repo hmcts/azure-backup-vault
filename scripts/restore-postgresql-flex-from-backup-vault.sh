@@ -57,8 +57,8 @@ select_recovery_point() {
 
   if [[ -n "$recovery_point_time_utc" ]]; then
     echo "$recovery_points_json" | jq -r --arg ts "$recovery_point_time_utc" '
-      map({name: .name, t: (.properties.recoveryPointTime | fromdateiso8601)})
-      | map(select(.t <= ($ts | fromdateiso8601)))
+      map({name: .name, t: (.properties.recoveryPointTime | gsub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)})
+      | map(select(.t <= ($ts | gsub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)))
       | sort_by(.t)
       | last
       | .name // empty
@@ -67,7 +67,7 @@ select_recovery_point() {
   fi
 
   echo "$recovery_points_json" | jq -r '
-    map({name: .name, t: (.properties.recoveryPointTime | fromdateiso8601)})
+    map({name: .name, t: (.properties.recoveryPointTime | gsub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)})
     | sort_by(.t)
     | last
     | .name // empty
