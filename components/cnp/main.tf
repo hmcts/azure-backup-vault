@@ -14,14 +14,6 @@ module "tags" {
   expiresAfter = var.expiresAfter
 }
 
-# Data source for  SDS jenkins-ptl-mi managed identity (prod only)
-data "azurerm_user_assigned_identity" "jenkins_ptl_mi" {
-  count               = var.env == "prod" ? 1 : 0
-  provider            = azurerm.sharedservicesptl
-  name                = "jenkins-ptl-mi"
-  resource_group_name = "managed-identities-ptl-rg"
-}
-
 # Module call to create backup vaults
 module "backup_vaults" {
   for_each = local.backup_vaults
@@ -82,6 +74,13 @@ module "restore_storage_account" {
       endpoint_tenant_id   = try(each.value.endpoint_tenant_id, null)
     }
   }
+
+  sa_subnets = [
+    data.azurerm_subnet.cft_ptl_aks_00.id,
+    data.azurerm_subnet.cft_ptl_aks_01.id,
+    data.azurerm_subnet.ss_ptl_aks_00.id,
+    data.azurerm_subnet.ss_ptl_aks_01.id
+  ]
 
   managed_identity_object_id = module.backup_vaults[try(each.value.backup_vault_key, "cnp-backup-vault")].backup_vault_principal_id
   role_assignments           = ["Storage Blob Data Contributor"]
