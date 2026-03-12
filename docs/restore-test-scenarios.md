@@ -35,9 +35,9 @@ Run in order. Verify each checkpoint before proceeding to the next scenario.
 
 | Checkpoint | Expected | Status |
 |---|---|---|
-| Log shows expected instance name | Instance name matches source server | — |
-| At least one recovery point listed | Recovery points with UTC timestamps | — |
-| No container created in storage account | Storage account unchanged | — |
+| Log shows expected instance name | Instance name matches source server | ✅ `plum-v14-flexible-sandbox-backup-instance` selected from 3 instances |
+| At least one recovery point listed | Recovery points with UTC timestamps | ✅ `fc0ae7fc1e944a8d8fa3e6ac612cd62f @ 2026-03-12T11:53:35.0886002Z` |
+| No container created in storage account | Storage account unchanged | ✅ Dry run — no mutations executed |
 
 ---
 
@@ -59,8 +59,8 @@ Run in order. Verify each checkpoint before proceeding to the next scenario.
 
 | Checkpoint | Expected | Status |
 |---|---|---|
-| Log contains "vault-only mode: skipping blob and database restore discovery" | Scoping gate confirmed | — |
-| No blob listing attempted | No storage account calls in log | — |
+| Log contains "vault-only mode: skipping blob and database restore discovery" | Scoping gate confirmed | ✅ Message present |
+| No blob listing attempted | No storage account calls in log | ✅ Confirmed — no storage calls |
 
 ---
 
