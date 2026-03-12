@@ -60,11 +60,15 @@ Recommended non-secret runtime parameters:
 - `vaultName`
 - `backupInstanceName` or `backupInstanceFriendlyNameFilter`
 - `recoveryPointId` or `recoveryPointTimeUtc`
-- `targetStorageAccount`
-- `targetStorageContainer`
+- `restoreMode` (`all` / `vault-only` / `database-only`)
+- `existingRestoreContainer` (required when `restoreMode=database-only`)
 - `dryRun` (default `true`; set `false` to execute restore)
-- `runDatabaseRestore`
-- `targetPostgresHost`, `targetPostgresAdminUser`, `targetPostgresDatabase`
+- `restoreRoles` (default `true`)
+- `sourceServerName`
+- `sourceResourceGroup`
+- `restoredServerName` (optional; auto-generated as `<sourceServerName>-restored` if omitted)
+- `targetPostgresDatabase`
+- `targetPostgresHost`, `targetPostgresAdminUser`, `targetPostgresPort`
 
 ## Artifacts and failure handling
 

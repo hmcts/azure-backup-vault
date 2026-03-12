@@ -98,6 +98,31 @@ Restore automation entry points:
 - **CPP Restore Pipeline**: register in `https://dev.azure.com/hmcts-cpp/` ([source](./azure-pipelines-restore-cpp.yaml))
 - **Runbook**: [PostgreSQL Restore Automation Runbook](./docs/postgresql-restore-automation-runbook.md)
 
+### Restore Operation Modes
+
+Both restore pipelines (`azure-pipelines-restore-cnp.yaml` / `azure-pipelines-restore-cpp.yaml`) expose two independent parameters that control what the run does:
+
+- **`restoreMode`** — controls which phases of the restore are executed
+- **`dryRun`** — when `true`, performs read-only discovery and prints a command preview without modifying any Azure resource or database; compatible with all three `restoreMode` values
+
+| `restoreMode` | `dryRun` | Vault restore | DB restore | Stage 3 validate | Notes |
+|---|---|---|---|---|---|
+| `all` | `false` | ✅ | ✅ | ✅ | Full end-to-end restore |
+| `all` | `true` | 🔍 discover only | 🔍 discover only | ⏭️ skipped | Previews both vault + DB commands |
+| `vault-only` | `false` | ✅ | ❌ | ❌ | Blobs land in storage; no Postgres server created |
+| `vault-only` | `true` | 🔍 discover only | ❌ | ⏭️ skipped | Previews vault restore commands only |
+| `database-only` | `false` | ❌ | ✅ | ✅ | Reuses `existingRestoreContainer`; skips vault |
+| `database-only` | `true` | ❌ | 🔍 discover only | ⏭️ skipped | Lists blobs in `existingRestoreContainer`; previews DB restore commands |
+
+**Key rules:**
+- `existingRestoreContainer` must be set (not `none`) when `restoreMode=database-only`, including for dry runs — blob discovery needs the container name.
+- Stage 3 (validate) is always skipped when `restoreMode=vault-only` (no database was restored) or `dryRun=true` (no server was provisioned).
+- `createPostgresServer` (Stage 1) is skipped for `vault-only` regardless of `dryRun`.
+
+See the [Operational Runbook](./docs/postgresql-restore-automation-runbook.md) for step-by-step usage guidance.
+
+---
+
 ### Adding a New Backup Vault
 
 To add a new backup vault configuration:

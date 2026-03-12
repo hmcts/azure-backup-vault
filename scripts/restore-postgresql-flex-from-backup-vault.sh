@@ -107,6 +107,27 @@ discover_roles_blob() {
   '
 }
 
+# Returns one blob name per line for every *_database_<name>.sql blob in the container.
+discover_all_database_blobs() {
+  local blobs_json="$1"
+  local file_prefix="${2:-}"
+
+  echo "$blobs_json" | jq -r --arg prefix "$file_prefix" '
+    map(select(
+      ((.name | ascii_downcase) | test("_database_[^/]+\\.sql$"))
+      and (if $prefix != "" then (.name | startswith($prefix)) else true end)
+    ))
+    | sort_by(.name)
+    | .[].name
+  '
+}
+
+# Extracts the database name from a blob filename of the form *_database_<name>.sql
+db_name_from_blob() {
+  local blob_name="$1"
+  echo "$blob_name" | sed -E 's/.*_database_([^/]+)\.sql$/\1/'
+}
+
 roles_restore_has_unexpected_errors() {
   local roles_restore_log="$1"
   local roles_errors_file="$2"
@@ -143,11 +164,15 @@ main() {
   local target_file_prefix="${TARGET_FILE_PREFIX:-restore-${BUILD_BUILDID:-local}}"
   local restore_timeout_minutes="${RESTORE_TIMEOUT_MINUTES:-240}"
   local poll_seconds="${POLL_SECONDS:-30}"
-  local run_database_restore="${RUN_DATABASE_RESTORE:-false}"
+  local restore_scope="${RESTORE_MODE:-all}"
   local restore_roles="${RESTORE_ROLES:-true}"
   local postgres_port="${TARGET_POSTGRES_PORT:-5432}"
 
   mkdir -p restore-output
+  # Always remove any downloaded dump files on exit, including on failure or abort,
+  # so sensitive database content does not persist on the agent disk.
+  trap 'rm -f restore-output/*_database_*.sql 2>/dev/null || true' EXIT
+
   local metrics_file="restore-output/restore-metrics.json"
   local request_file="restore-output/restore-request.json"
   local trigger_file="restore-output/restore-trigger.json"
@@ -156,81 +181,105 @@ main() {
 
   if [[ "${dry_run,,}" == "true" ]]; then
     log "DRY_RUN=true: mutating Azure/PostgreSQL commands are disabled."
-    log "Running read-only Azure discovery commands."
+    log "RESTORE_MODE: ${restore_scope}"
+    log "Running read-only discovery commands for scope: ${restore_scope}."
 
     if ! command -v az >/dev/null 2>&1; then
       fail "Azure CLI (az) is required for dry-run read-only discovery."
     fi
 
-    local instances_json
-    instances_json=$(az dataprotection backup-instance list -g "$VAULT_RESOURCE_GROUP" --vault-name "$VAULT_NAME" -o json)
-
-    log "Available backup instances:"
-    echo "$instances_json" | jq -r '.[] | "- \(.name) [\(.properties.friendlyName // "unknown")]"'
-
     local selected_instance_name=""
-    if [[ -n "$backup_instance_name" ]]; then
-      selected_instance_name=$(find_instance_by_name "$instances_json" "$backup_instance_name")
-    elif [[ -n "$backup_instance_friendly_name_filter" ]]; then
-      selected_instance_name=$(find_instance_by_friendly_name "$instances_json" "$backup_instance_friendly_name_filter")
-    fi
-
     local selected_recovery_point_id=""
-    if [[ -n "$selected_instance_name" ]]; then
-      log "Selected backup instance: ${selected_instance_name}"
-      local recovery_points_json
-      recovery_points_json=$(az dataprotection recovery-point list \
-        --backup-instance-name "$selected_instance_name" \
-        -g "$VAULT_RESOURCE_GROUP" \
-        --vault-name "$VAULT_NAME" \
-        -o json)
+    if [[ "$restore_scope" != "database-only" ]]; then
+      local instances_json
+      instances_json=$(az dataprotection backup-instance list -g "$VAULT_RESOURCE_GROUP" --vault-name "$VAULT_NAME" -o json)
 
-      log "Available recovery points (UTC):"
-      echo "$recovery_points_json" | jq -r '.[] | "- \(.name) @ \(.properties.recoveryPointTime)"'
+      log "Available backup instances:"
+      echo "$instances_json" | jq -r '.[] | "- \(.name) [\(.properties.friendlyName // "unknown")]"'
 
-      selected_recovery_point_id=$(select_recovery_point "$recovery_points_json" "$recovery_point_id" "$recovery_point_time_utc")
-      if [[ -n "$selected_recovery_point_id" ]]; then
-        log "Selected recovery point: ${selected_recovery_point_id}"
+      if [[ -n "$backup_instance_name" ]]; then
+        selected_instance_name=$(find_instance_by_name "$instances_json" "$backup_instance_name")
+      elif [[ -n "$backup_instance_friendly_name_filter" ]]; then
+        selected_instance_name=$(find_instance_by_friendly_name "$instances_json" "$backup_instance_friendly_name_filter")
+      fi
+
+      if [[ -n "$selected_instance_name" ]]; then
+        log "Selected backup instance: ${selected_instance_name}"
+        local recovery_points_json
+        recovery_points_json=$(az dataprotection recovery-point list \
+          --backup-instance-name "$selected_instance_name" \
+          -g "$VAULT_RESOURCE_GROUP" \
+          --vault-name "$VAULT_NAME" \
+          -o json)
+
+        log "Available recovery points (UTC):"
+        echo "$recovery_points_json" | jq -r '.[] | "- \(.name) @ \(.properties.recoveryPointTime)"'
+
+        selected_recovery_point_id=$(select_recovery_point "$recovery_points_json" "$recovery_point_id" "$recovery_point_time_utc")
+        if [[ -n "$selected_recovery_point_id" ]]; then
+          log "Selected recovery point: ${selected_recovery_point_id}"
+        else
+          log "Could not resolve recovery point from provided inputs."
+        fi
       else
-        log "Could not resolve recovery point from provided inputs."
+        log "Backup instance not resolved from provided filters. Skipping recovery-point lookup."
       fi
     else
-      log "Backup instance not resolved from provided filters. Skipping recovery-point lookup."
+      log "database-only mode: skipping vault instance/recovery-point discovery."
     fi
 
-    if [[ "${run_database_restore}" == "true" ]]; then
+    if [[ "$restore_scope" != "vault-only" ]]; then
       local blobs_json
+      # The container may not exist in a dry run (Stage 1 skips creation).
+      # Fall back to an empty list so discovery logs "<not found>" rather than aborting.
       blobs_json=$(az storage blob list \
         --account-name "$TARGET_STORAGE_ACCOUNT" \
         --container-name "$TARGET_STORAGE_CONTAINER" \
         --auth-mode login \
-        -o json)
+        -o json 2>/dev/null) || blobs_json="[]"
 
       log "Blob discovery (read-only):"
-      local database_blob_name=""
-      local roles_blob_name=""
-      if [[ -n "${TARGET_POSTGRES_DATABASE:-}" ]]; then
-        database_blob_name=$(discover_database_blob "$blobs_json" "$TARGET_POSTGRES_DATABASE" "$restore_target_file_name")
+      local dry_db_blobs=()
+      while IFS= read -r blob; do
+        [[ -n "$blob" ]] && dry_db_blobs+=("$blob")
+      done < <(discover_all_database_blobs "$blobs_json" "$restore_target_file_name")
+      if [[ ${#dry_db_blobs[@]} -eq 0 ]]; then
+        log "  No database blobs found (container may not exist yet in dry run)"
+      else
+        log "  Found ${#dry_db_blobs[@]} database blob(s):"
+        for blob in "${dry_db_blobs[@]}"; do
+          log "    - ${blob}"
+        done
       fi
+      local roles_blob_name
       roles_blob_name=$(discover_roles_blob "$blobs_json" "$restore_target_file_name")
-      log "Selected database blob: ${database_blob_name:-<not found>}"
       log "Selected roles blob: ${roles_blob_name:-<not found>}"
     else
-      log "RUN_DATABASE_RESTORE=false: DB restore phase discovery skipped."
+      log "vault-only mode: skipping blob and database restore discovery."
     fi
 
     log "Planned mutating steps (preview only, not executed in DRY_RUN):"
-    cat <<EOF
+    if [[ "$restore_scope" != "database-only" ]]; then
+      cat <<EOF
 [DRY RUN PREVIEW] az dataprotection backup-instance restore initialize-for-data-recovery-as-files --datasource-type AzureDatabaseForPostgreSQLFlexibleServer --restore-location "${RESTORE_LOCATION}" --source-datastore VaultStore --target-blob-container-url "${target_container_uri}" --target-file-name "${restore_target_file_name}" --recovery-point-id "${selected_recovery_point_id:-<resolved-rp>}" > "${request_file}"
 [DRY RUN PREVIEW] az dataprotection backup-instance restore trigger -g "${VAULT_RESOURCE_GROUP}" --vault-name "${VAULT_NAME}" --backup-instance-name "${selected_instance_name:-<resolved-instance>}" --restore-request-object "${request_file}" -o json > "${trigger_file}"
 [DRY RUN PREVIEW] az dataprotection job show -g "${VAULT_RESOURCE_GROUP}" --vault-name "${VAULT_NAME}" --name "<restore-job-name>" -o json (polled every ${poll_seconds}s, timeout ${restore_timeout_minutes}m)
-[DRY RUN PREVIEW] Write metrics to "${metrics_file}"
+[DRY RUN PREVIEW] Write vault restore metrics to "${metrics_file}"
 EOF
+    fi
+    if [[ "$restore_scope" != "vault-only" ]]; then
+      cat <<EOF
+[DRY RUN PREVIEW] pg_restore / psql: restore all discovered database blobs onto host "${TARGET_POSTGRES_HOST:-<host>}"
+[DRY RUN PREVIEW] Write database restore metrics to "${metrics_file}"
+EOF
+    fi
 
     log "Dry run complete. Only read-only Azure commands were executed. No restore was triggered and no remote state was changed."
     return
   fi
 
+  # Vault restore phase — skip entirely for database-only mode
+  if [[ "$restore_scope" != "database-only" ]]; then
   log "Ensuring dataprotection extension is available"
   az extension add --name dataprotection --upgrade --only-show-errors >/dev/null
 
@@ -372,8 +421,10 @@ EOF
     fail "Restore job ended unsuccessfully with status: ${job_state}"
   fi
 
-  if [[ "$run_database_restore" != "true" ]]; then
-    log "Vault-to-storage restore completed. Database restore phase is skipped (RUN_DATABASE_RESTORE=false)."
+  fi # end vault restore phase (restore_scope != database-only)
+
+  if [[ "$restore_scope" == "vault-only" ]]; then
+    log "Vault-to-storage restore completed (vault-only mode)."
     log "Metrics file: ${metrics_file}"
     return
   fi
@@ -381,7 +432,6 @@ EOF
   require_env "TARGET_POSTGRES_HOST"
   require_env "TARGET_POSTGRES_ADMIN_USER"
   require_env "TARGET_POSTGRES_ADMIN_PASSWORD"
-  require_env "TARGET_POSTGRES_DATABASE"
 
   if ! command -v psql >/dev/null 2>&1 || ! command -v pg_restore >/dev/null 2>&1; then
     log "Installing PostgreSQL client tools"
@@ -396,14 +446,24 @@ EOF
     --auth-mode login \
     -o json)
 
-  local database_blob_name
-  database_blob_name=$(discover_database_blob "$blobs_json" "$TARGET_POSTGRES_DATABASE" "$restore_target_file_name")
-  if [[ -z "$database_blob_name" ]]; then
-    log "No blob matched with prefix '${restore_target_file_name}', retrying without prefix filter"
-    database_blob_name=$(discover_database_blob "$blobs_json" "$TARGET_POSTGRES_DATABASE")
+  # Discover all database blobs, falling back to a prefix-free search if needed
+  local all_db_blobs=()
+  while IFS= read -r blob; do
+    [[ -n "$blob" ]] && all_db_blobs+=("$blob")
+  done < <(discover_all_database_blobs "$blobs_json" "$restore_target_file_name")
+
+  if [[ ${#all_db_blobs[@]} -eq 0 ]]; then
+    log "No blobs matched with prefix '${restore_target_file_name}', retrying without prefix filter"
+    while IFS= read -r blob; do
+      [[ -n "$blob" ]] && all_db_blobs+=("$blob")
+    done < <(discover_all_database_blobs "$blobs_json")
   fi
-  [[ -n "$database_blob_name" ]] || fail "Could not find database blob ending with _database_${TARGET_POSTGRES_DATABASE}.sql"
-  log "Selected database blob: ${database_blob_name}"
+
+  [[ ${#all_db_blobs[@]} -gt 0 ]] || fail "No database blobs found in container ${TARGET_STORAGE_CONTAINER}"
+  log "Found ${#all_db_blobs[@]} database blob(s) to restore:"
+  for blob in "${all_db_blobs[@]}"; do
+    log "  - ${blob}"
+  done
 
   local roles_blob_name=""
   if [[ "$restore_roles" == "true" ]]; then
@@ -417,15 +477,6 @@ EOF
       log "Selected roles blob: ${roles_blob_name}"
     fi
   fi
-
-  local db_file="restore-output/${database_blob_name##*/}"
-  az storage blob download \
-    --account-name "$TARGET_STORAGE_ACCOUNT" \
-    --container-name "$TARGET_STORAGE_CONTAINER" \
-    --name "$database_blob_name" \
-    --file "$db_file" \
-    --auth-mode login \
-    -o none
 
   local roles_file=""
   if [[ -n "$roles_blob_name" ]]; then
@@ -441,22 +492,7 @@ EOF
 
   export PGPASSWORD="$TARGET_POSTGRES_ADMIN_PASSWORD"
 
-  local db_restore_started_epoch
-  db_restore_started_epoch=$(date +%s)
-
-  local database_exists
-  database_exists=$(psql \
-    "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=postgres sslmode=require" \
-    -tAc "SELECT 1 FROM pg_database WHERE datname='${TARGET_POSTGRES_DATABASE}'" | tr -d '[:space:]')
-
-  if [[ "$database_exists" != "1" ]]; then
-    log "Creating target database ${TARGET_POSTGRES_DATABASE}"
-    psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=postgres sslmode=require" \
-      -c "CREATE DATABASE \"${TARGET_POSTGRES_DATABASE}\" WITH OWNER = \"${TARGET_POSTGRES_ADMIN_USER}\" ENCODING = 'UTF8' LC_COLLATE = 'en_GB.utf8' LC_CTYPE = 'en_GB.utf8' TEMPLATE = template0;"
-  else
-    log "Target database ${TARGET_POSTGRES_DATABASE} already exists"
-  fi
-
+  # Restore roles once up front, before the per-database loop
   if [[ -n "$roles_file" ]]; then
     local roles_restore_log="restore-output/roles-restore.log"
     local roles_errors_file="restore-output/roles-restore-errors.log"
@@ -486,49 +522,144 @@ EOF
     fi
   fi
 
-  local restore_mode="pg_restore"
-  set +e
-  pg_restore \
-    -h "$TARGET_POSTGRES_HOST" \
-    -p "$postgres_port" \
-    -U "$TARGET_POSTGRES_ADMIN_USER" \
-    -d "$TARGET_POSTGRES_DATABASE" \
-    --no-owner \
-    -v \
-    "$db_file"
-  local pg_restore_exit_code=$?
-  set -e
+  local db_results_json="[]"
+  local total_db_restore_started_epoch
+  total_db_restore_started_epoch=$(date +%s)
 
-  if [[ "$pg_restore_exit_code" -ne 0 ]]; then
-    log "pg_restore failed, falling back to psql file restore"
-    restore_mode="psql"
-    psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=${TARGET_POSTGRES_DATABASE} sslmode=require" -f "$db_file"
-  fi
+  for database_blob_name in "${all_db_blobs[@]}"; do
+    local db_name
+    db_name=$(db_name_from_blob "$database_blob_name")
 
-  local db_restore_ended_epoch
-  db_restore_ended_epoch=$(date +%s)
-  local db_restore_duration_seconds=$((db_restore_ended_epoch - db_restore_started_epoch))
+    log "============================================================"
+    log " Restoring database: ${db_name}"
+    log " Blob: ${database_blob_name}"
+    log "============================================================"
 
-  jq \
-    --arg restoreMode "$restore_mode" \
-    --arg databaseBlob "$database_blob_name" \
-    --arg rolesBlob "$roles_blob_name" \
-    --arg targetPostgresHost "$TARGET_POSTGRES_HOST" \
-    --arg targetPostgresDatabase "$TARGET_POSTGRES_DATABASE" \
-    --argjson databaseRestoreDurationSeconds "$db_restore_duration_seconds" \
-    '. + {
-      databaseRestore: {
-        restoreMode: $restoreMode,
+    local db_file="restore-output/${database_blob_name##*/}"
+    az storage blob download \
+      --account-name "$TARGET_STORAGE_ACCOUNT" \
+      --container-name "$TARGET_STORAGE_CONTAINER" \
+      --name "$database_blob_name" \
+      --file "$db_file" \
+      --auth-mode login \
+      -o none
+
+    local db_restore_started_epoch
+    db_restore_started_epoch=$(date +%s)
+
+    local database_exists
+    database_exists=$(psql \
+      "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=postgres sslmode=require" \
+      -tAc "SELECT 1 FROM pg_database WHERE datname='${db_name}'" | tr -d '[:space:]')
+
+    if [[ "$database_exists" != "1" ]]; then
+      log "Creating target database ${db_name}"
+      psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=postgres sslmode=require" \
+        -c "CREATE DATABASE \"${db_name}\" WITH OWNER = \"${TARGET_POSTGRES_ADMIN_USER}\" ENCODING = 'UTF8' LC_COLLATE = 'en_GB.utf8' LC_CTYPE = 'en_GB.utf8' TEMPLATE = template0;"
+    else
+      log "Target database ${db_name} already exists"
+    fi
+
+    local pg_restore_log="restore-output/pg_restore-${db_name}.log"
+    local db_restore_tool="pg_restore"
+    set +e
+    pg_restore \
+      -h "$TARGET_POSTGRES_HOST" \
+      -p "$postgres_port" \
+      -U "$TARGET_POSTGRES_ADMIN_USER" \
+      -d "$db_name" \
+      --no-owner \
+      -v \
+      "$db_file" 2>&1 | tee "$pg_restore_log"
+    local pg_restore_exit_code=${PIPESTATUS[0]}
+    set -e
+
+    if [[ "$pg_restore_exit_code" -ne 0 ]]; then
+      # If pg_restore loaded data for any tables before failing, a psql fallback
+      # would cause a duplicate load. This is the dangerous case (especially for
+      # plain-SQL dumps with no unique constraints). Abort instead.
+      local data_loaded
+      data_loaded=$(grep -c "^pg_restore: restoring data for table" "$pg_restore_log" 2>/dev/null || echo "0")
+
+      if [[ "$data_loaded" -gt 0 ]]; then
+        fail "pg_restore loaded data for ${data_loaded} table(s) in ${db_name} before failing (exit ${pg_restore_exit_code}). Refusing psql fallback to prevent duplicate load. Review ${pg_restore_log}."
+      fi
+
+      # Only fall back when no data was loaded and the file is confirmed plain-text SQL.
+      if file "$db_file" | grep -q "ASCII text"; then
+        log "pg_restore failed with no data loaded and file is plain-text SQL. Falling back to psql."
+        db_restore_tool="psql"
+        psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=${db_name} sslmode=require" -f "$db_file"
+      else
+        fail "pg_restore failed (exit ${pg_restore_exit_code}) for ${db_name} and file is not plain-text SQL. No fallback available. Review ${pg_restore_log}."
+      fi
+    fi
+
+    local db_restore_ended_epoch
+    db_restore_ended_epoch=$(date +%s)
+    local db_restore_duration_seconds=$((db_restore_ended_epoch - db_restore_started_epoch))
+
+    local db_entry
+    db_entry=$(jq -n \
+      --arg databaseBlob "$database_blob_name" \
+      --arg databaseName "$db_name" \
+      --arg dbRestoreTool "$db_restore_tool" \
+      --argjson durationSeconds "$db_restore_duration_seconds" \
+      '{
         databaseBlob: $databaseBlob,
+        databaseName: $databaseName,
+        restoreTool: $dbRestoreTool,
+        durationSeconds: $durationSeconds
+      }')
+    db_results_json=$(echo "$db_results_json" | jq --argjson entry "$db_entry" '. + [$entry]')
+
+    log "Database ${db_name} restored in ${db_restore_duration_seconds}s using ${db_restore_tool}"
+
+    # Remove the local dump file now that restore is complete to avoid
+    # accumulating all blobs on the agent disk simultaneously.
+    rm -f "$db_file"
+  done
+
+  local total_db_restore_ended_epoch
+  total_db_restore_ended_epoch=$(date +%s)
+  local total_db_restore_duration_seconds=$((total_db_restore_ended_epoch - total_db_restore_started_epoch))
+
+  if [[ "$restore_scope" == "database-only" ]]; then
+    # No vault metrics exist yet — write a fresh metrics file for this scope
+    jq -n \
+      --arg restoreScope "$restore_scope" \
+      --arg targetStorageAccount "$TARGET_STORAGE_ACCOUNT" \
+      --arg targetStorageContainer "$TARGET_STORAGE_CONTAINER" \
+      --arg rolesBlob "$roles_blob_name" \
+      --arg targetPostgresHost "$TARGET_POSTGRES_HOST" \
+      --argjson databaseRestores "$db_results_json" \
+      --argjson totalDurationSeconds "$total_db_restore_duration_seconds" \
+      '{
+        restoreScope: $restoreScope,
+        targetStorageAccount: $targetStorageAccount,
+        targetStorageContainer: $targetStorageContainer,
         rolesBlob: $rolesBlob,
         targetPostgresHost: $targetPostgresHost,
-        targetPostgresDatabase: $targetPostgresDatabase,
-        databaseRestoreDurationSeconds: $databaseRestoreDurationSeconds
-      }
-    }' "$metrics_file" > "${metrics_file}.tmp"
-  mv "${metrics_file}.tmp" "$metrics_file"
+        databaseRestores: $databaseRestores,
+        totalDatabaseRestoreDurationSeconds: $totalDurationSeconds
+      }' > "$metrics_file"
+  else
+    # Append DB restore details to the existing vault restore metrics
+    jq \
+      --arg rolesBlob "$roles_blob_name" \
+      --arg targetPostgresHost "$TARGET_POSTGRES_HOST" \
+      --argjson databaseRestores "$db_results_json" \
+      --argjson totalDurationSeconds "$total_db_restore_duration_seconds" \
+      '. + {
+        rolesBlob: $rolesBlob,
+        targetPostgresHost: $targetPostgresHost,
+        databaseRestores: $databaseRestores,
+        totalDatabaseRestoreDurationSeconds: $totalDurationSeconds
+      }' "$metrics_file" > "${metrics_file}.tmp"
+    mv "${metrics_file}.tmp" "$metrics_file"
+  fi
 
-  log "Database restore phase completed"
+  log "Database restore phase completed: ${#all_db_blobs[@]} database(s) restored in ${total_db_restore_duration_seconds}s"
   log "Metrics file: ${metrics_file}"
 }
 
