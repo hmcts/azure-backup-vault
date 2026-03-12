@@ -39,6 +39,14 @@ parameters:
     type: string
   - name: vaultName
     type: string
+  # Subscription ID or name where the backup vault lives.
+  # Leave as 'none' when the vault is in the same subscription as the service
+  # connection. Required when the vault subscription differs (e.g. a shared
+  # mgmt subscription hosting the vault while the service connection defaults
+  # to a workload subscription).
+  - name: vaultSubscription
+    type: string
+    default: 'none'
   # Override: exact backup-instance name in Azure Backup Vault (e.g.
   # "my-server-backup-instance" — visible in the Backup vault → Backup instances
   # list, or via: az dataprotection backup-instance list -g <rg> --vault-name <vault> -o table).
@@ -358,6 +366,7 @@ stages:
             env:
               VAULT_RESOURCE_GROUP: ${{ parameters.vaultResourceGroup }}
               VAULT_NAME: ${{ parameters.vaultName }}
+              VAULT_SUBSCRIPTION: ${{ parameters.vaultSubscription }}
               SOURCE_SERVER_NAME: ${{ parameters.sourceServerName }}
               BACKUP_INSTANCE_NAME: ${{ parameters.backupInstanceName }}
               BACKUP_INSTANCE_FRIENDLY_NAME_FILTER: ${{ parameters.backupInstanceFriendlyNameFilter }}

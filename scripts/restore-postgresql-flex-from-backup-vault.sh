@@ -168,6 +168,10 @@ main() {
   [[ "$recovery_point_id" == "none" ]] && recovery_point_id=""
   local recovery_point_time_utc="${RECOVERY_POINT_TIME_UTC:-}"
   [[ "$recovery_point_time_utc" == "none" ]] && recovery_point_time_utc=""
+  local vault_subscription="${VAULT_SUBSCRIPTION:-}"
+  [[ "$vault_subscription" == "none" ]] && vault_subscription=""
+  local vault_sub_flag=""
+  [[ -n "$vault_subscription" ]] && vault_sub_flag="--subscription ${vault_subscription}"
   local target_file_prefix="${TARGET_FILE_PREFIX:-restore-${BUILD_BUILDID:-local}}"
   local restore_timeout_minutes="${RESTORE_TIMEOUT_MINUTES:-240}"
   local poll_seconds="${POLL_SECONDS:-30}"
@@ -208,7 +212,8 @@ main() {
     local selected_recovery_point_id=""
     if [[ "$restore_scope" != "database-only" ]]; then
       local instances_json
-      instances_json=$(az dataprotection backup-instance list -g "$VAULT_RESOURCE_GROUP" --vault-name "$VAULT_NAME" -o json)
+      # shellcheck disable=SC2086
+      instances_json=$(az dataprotection backup-instance list -g "$VAULT_RESOURCE_GROUP" --vault-name "$VAULT_NAME" $vault_sub_flag -o json)
 
       log "Available backup instances:"
       echo "$instances_json" | jq -r '.[] | "- \(.name) [\(.properties.friendlyName // "unknown")]"'
@@ -222,10 +227,12 @@ main() {
       if [[ -n "$selected_instance_name" ]]; then
         log "Selected backup instance: ${selected_instance_name}"
         local recovery_points_json
+        # shellcheck disable=SC2086
         recovery_points_json=$(az dataprotection recovery-point list \
           --backup-instance-name "$selected_instance_name" \
           -g "$VAULT_RESOURCE_GROUP" \
           --vault-name "$VAULT_NAME" \
+          $vault_sub_flag \
           -o json)
 
         log "Available recovery points (UTC):"
@@ -278,8 +285,8 @@ main() {
     if [[ "$restore_scope" != "database-only" ]]; then
       cat <<EOF
 [DRY RUN PREVIEW] az dataprotection backup-instance restore initialize-for-data-recovery-as-files --datasource-type AzureDatabaseForPostgreSQLFlexibleServer --restore-location "${RESTORE_LOCATION}" --source-datastore VaultStore --target-blob-container-url "${target_container_uri}" --target-file-name "${restore_target_file_name}" --recovery-point-id "${selected_recovery_point_id:-<resolved-rp>}" > "${request_file}"
-[DRY RUN PREVIEW] az dataprotection backup-instance restore trigger -g "${VAULT_RESOURCE_GROUP}" --vault-name "${VAULT_NAME}" --backup-instance-name "${selected_instance_name:-<resolved-instance>}" --restore-request-object "${request_file}" -o json > "${trigger_file}"
-[DRY RUN PREVIEW] az dataprotection job show -g "${VAULT_RESOURCE_GROUP}" --vault-name "${VAULT_NAME}" --name "<restore-job-name>" -o json (polled every ${poll_seconds}s, timeout ${restore_timeout_minutes}m)
+[DRY RUN PREVIEW] az dataprotection backup-instance restore trigger -g "${VAULT_RESOURCE_GROUP}" --vault-name "${VAULT_NAME}" --backup-instance-name "${selected_instance_name:-<resolved-instance>}" --restore-request-object "${request_file}" ${vault_sub_flag} -o json > "${trigger_file}"
+[DRY RUN PREVIEW] az dataprotection job show -g "${VAULT_RESOURCE_GROUP}" --vault-name "${VAULT_NAME}" --name "<restore-job-name>" ${vault_sub_flag} -o json (polled every ${poll_seconds}s, timeout ${restore_timeout_minutes}m)
 [DRY RUN PREVIEW] Write vault restore metrics to "${metrics_file}"
 EOF
     fi
@@ -301,7 +308,8 @@ EOF
 
   log "Listing backup instances from vault ${VAULT_NAME}"
   local instances_json
-  instances_json=$(az dataprotection backup-instance list -g "$VAULT_RESOURCE_GROUP" --vault-name "$VAULT_NAME" -o json)
+  # shellcheck disable=SC2086
+  instances_json=$(az dataprotection backup-instance list -g "$VAULT_RESOURCE_GROUP" --vault-name "$VAULT_NAME" $vault_sub_flag -o json)
 
   log "Available backup instances:"
   echo "$instances_json" | jq -r '.[] | "- \(.name) [\(.properties.friendlyName // "unknown")]"'
@@ -320,10 +328,12 @@ EOF
   log "Selected backup instance: ${selected_instance_name}"
 
   local recovery_points_json
+  # shellcheck disable=SC2086
   recovery_points_json=$(az dataprotection recovery-point list \
     --backup-instance-name "$selected_instance_name" \
     -g "$VAULT_RESOURCE_GROUP" \
     --vault-name "$VAULT_NAME" \
+    $vault_sub_flag \
     -o json)
 
   log "Available recovery points (UTC):"
@@ -351,11 +361,13 @@ EOF
   started_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   log "Triggering restore"
+  # shellcheck disable=SC2086
   az dataprotection backup-instance restore trigger \
     -g "$VAULT_RESOURCE_GROUP" \
     --vault-name "$VAULT_NAME" \
     --backup-instance-name "$selected_instance_name" \
     --restore-request-object "$request_file" \
+    $vault_sub_flag \
     -o json > "$trigger_file"
 
   local restore_job_name
@@ -372,10 +384,12 @@ EOF
   local job_details_file="restore-output/restore-job-details.json"
 
   while true; do
+    # shellcheck disable=SC2086
     az dataprotection job show \
       -g "$VAULT_RESOURCE_GROUP" \
       --vault-name "$VAULT_NAME" \
       --name "$restore_job_name" \
+      $vault_sub_flag \
       -o json > "$job_details_file"
 
     job_state=$(jq -r '.properties.status // .status // "Unknown"' "$job_details_file")
