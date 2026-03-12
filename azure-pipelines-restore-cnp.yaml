@@ -376,7 +376,7 @@ stages:
     dependsOn:
       - Provision
       - Restore
-    condition: and(succeeded('Restore'), eq(parameters.dryRun, false), ne('${{ parameters.restoreMode }}', 'vault-only'))
+    condition: and(succeeded('Restore'), eq('${{ parameters.dryRun }}', 'false'), ne('${{ parameters.restoreMode }}', 'vault-only'))
     variables:
       restoredServerFqdn: $[ stageDependencies.Provision.ProvisionResources.outputs['createPostgresServer.restoredServerFqdn'] ]
     jobs:
