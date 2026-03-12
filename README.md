@@ -119,7 +119,7 @@ Both restore pipelines (`azure-pipelines-restore-cnp.yaml` / `azure-pipelines-re
 - Stage 3 (validate) is always skipped when `restoreMode=vault-only` (no database was restored) or `dryRun=true` (no server was provisioned).
 - `createPostgresServer` (Stage 1) is skipped for `vault-only` regardless of `dryRun`.
 
-See the [Operational Runbook](./docs/postgresql-restore-automation-runbook.md) for step-by-step usage guidance.
+See the [Operational Runbook](./docs/postgresql-restore-automation-runbook.md) for step-by-step usage guidance and full parameter reference.
 
 ---
 

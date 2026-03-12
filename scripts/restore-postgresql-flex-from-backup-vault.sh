@@ -157,16 +157,32 @@ main() {
   require_env "RESTORE_LOCATION"
 
   local dry_run="${DRY_RUN:-true}"
+  # Pipeline parameters use sentinel values ('none'/'auto') instead of empty
+  # strings (Azure Pipelines does not allow default: ''). Normalise here so all
+  # downstream logic can use plain empty-string checks.
   local backup_instance_name="${BACKUP_INSTANCE_NAME:-}"
+  [[ "$backup_instance_name" == "none" ]] && backup_instance_name=""
   local backup_instance_friendly_name_filter="${BACKUP_INSTANCE_FRIENDLY_NAME_FILTER:-}"
+  [[ "$backup_instance_friendly_name_filter" == "none" ]] && backup_instance_friendly_name_filter=""
   local recovery_point_id="${RECOVERY_POINT_ID:-}"
+  [[ "$recovery_point_id" == "none" ]] && recovery_point_id=""
   local recovery_point_time_utc="${RECOVERY_POINT_TIME_UTC:-}"
+  [[ "$recovery_point_time_utc" == "none" ]] && recovery_point_time_utc=""
   local target_file_prefix="${TARGET_FILE_PREFIX:-restore-${BUILD_BUILDID:-local}}"
   local restore_timeout_minutes="${RESTORE_TIMEOUT_MINUTES:-240}"
   local poll_seconds="${POLL_SECONDS:-30}"
   local restore_scope="${RESTORE_MODE:-all}"
   local restore_roles="${RESTORE_ROLES:-true}"
   local postgres_port="${TARGET_POSTGRES_PORT:-5432}"
+  # If neither backup instance override was given, fall back to matching the
+  # source server name against the vault instance friendlyName. This covers the
+  # common case where the vault instance is named after the server, so the caller
+  # does not need to provide any backup-instance parameter.
+  local source_server_name="${SOURCE_SERVER_NAME:-}"
+  if [[ -z "$backup_instance_name" && -z "$backup_instance_friendly_name_filter" && -n "$source_server_name" ]]; then
+    backup_instance_friendly_name_filter="$source_server_name"
+    log "No backup instance override provided; auto-matching vault instances on sourceServerName '${source_server_name}'"
+  fi
 
   mkdir -p restore-output
   # Always remove any downloaded dump files on exit, including on failure or abort,

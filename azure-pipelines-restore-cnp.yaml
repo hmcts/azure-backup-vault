@@ -24,23 +24,43 @@ parameters:
     type: string
   - name: restoredServerName
     type: string
-    default: ''
+    # 'auto' generates the name as "${sourceServerName}-restored".
+    # Required (must not be 'auto') when restoreMode=database-only.
+    default: 'auto'
   - name: vaultResourceGroup
     type: string
   - name: vaultName
     type: string
+  # Override: exact backup-instance name in Azure Backup Vault (e.g.
+  # "my-server-backup-instance" — visible in the Backup vault → Backup instances
+  # list, or via: az dataprotection backup-instance list -g <rg> --vault-name <vault> -o table).
+  # Leave as 'none' to auto-match on sourceServerName (recommended).
+  # Only needed if auto-match is ambiguous or the name doesn't contain the server name.
+  # Ignored for restoreMode=database-only.
   - name: backupInstanceName
     type: string
-    default: ''
+    default: 'none'
+  # Override: regex/substring matched case-insensitively against backup instance
+  # friendlyName (the default naming convention is "${serverName}-backup-instance").
+  # Leave as 'none' to auto-match on sourceServerName (recommended).
+  # Only needed if you want a different match pattern than the server name.
+  # Ignored for restoreMode=database-only.
   - name: backupInstanceFriendlyNameFilter
     type: string
-    default: ''
+    default: 'none'
+  # Recovery point identifier. Leave as 'none' to restore from the most recent
+  # available recovery point (recommended default).
+  # Provide a specific ID to pin to an exact point. Ignored for restoreMode=database-only.
   - name: recoveryPointId
     type: string
-    default: ''
+    default: 'none'
+  # ISO-8601 UTC timestamp (e.g. '2026-03-10T02:00:00Z'). Leave as 'none' to
+  # restore from the most recent available recovery point (recommended default).
+  # When provided, selects the latest recovery point at or before this time.
+  # Provide this OR recoveryPointId, not both. Ignored for restoreMode=database-only.
   - name: recoveryPointTimeUtc
     type: string
-    default: ''
+    default: 'none'
   - name: restoreLocation
     type: string
     default: uksouth
@@ -149,9 +169,9 @@ stages:
                 CONTAINER_NAME="${SERVER_SLUG}${BUILD_ID}${TIMESTAMP}"
 
                 # Validate container name before use
-                if [[ ${#CONTAINER_NAME} -ge 64 ]]; then
-                  echo "WARNING: Container name exceeded 64 characters (${#CONTAINER_NAME} chars), truncating: ${CONTAINER_NAME}"
-                  CONTAINER_NAME="${CONTAINER_NAME:0:64}"
+                if [[ ${#CONTAINER_NAME} -ge 63 ]]; then
+                  echo "WARNING: Container name exceeded 63 characters (${#CONTAINER_NAME} chars), truncating: ${CONTAINER_NAME}"
+                  CONTAINER_NAME="${CONTAINER_NAME:0:63}"
                   echo "WARNING: Truncated container name: ${CONTAINER_NAME}"
                 fi
                 if [[ "${CONTAINER_NAME}" =~ [' '._-] ]]; then
@@ -184,7 +204,7 @@ stages:
 
           - task: AzureCLI@2
             name: createPostgresServer
-            displayName: Create restored Postgres server
+            displayName: Create or resolve restored Postgres server
             condition: ne('${{ parameters.restoreMode }}', 'vault-only')
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
@@ -192,6 +212,22 @@ stages:
               scriptLocation: inlineScript
               inlineScript: |
                 set -euo pipefail
+
+                # For database-only mode the server was already created by a prior
+                # vault-only run. Skip source-server lookup and creation entirely;
+                # just compute the FQDN from restoredServerName (mandatory here).
+                if [[ "${RESTORE_MODE}" == "database-only" ]]; then
+                  if [[ -z "${RESTORED_SERVER_NAME}" || "${RESTORED_SERVER_NAME}" == "auto" ]]; then
+                    echo "ERROR: restoredServerName must be explicitly provided when restoreMode=database-only."
+                    echo "ERROR: Specify the name of the server created by the previous vault-only restore run."
+                    exit 1
+                  fi
+                  EXPECTED_FQDN="${RESTORED_SERVER_NAME}.postgres.database.azure.com"
+                  echo "database-only mode: target server '${RESTORED_SERVER_NAME}' (assumed pre-existing from prior vault-only run)"
+                  echo "Target FQDN: ${EXPECTED_FQDN}"
+                  echo "##vso[task.setvariable variable=restoredServerFqdn;isOutput=true]${EXPECTED_FQDN}"
+                  exit 0
+                fi
 
                 echo "Fetching source server config: ${SOURCE_SERVER_NAME} in ${SOURCE_RESOURCE_GROUP}"
                 SOURCE=$(az postgres flexible-server show \
@@ -217,7 +253,7 @@ stages:
                 echo "NOTE: High Availability is intentionally disabled on the restored server (ADR-001 in docs/architecture-decisions.md)"
 
                 RESTORED_NAME="${RESTORED_SERVER_NAME}"
-                if [[ -z "${RESTORED_NAME}" ]]; then
+                if [[ -z "${RESTORED_NAME}" || "${RESTORED_NAME}" == "auto" ]]; then
                   RESTORED_NAME="${SOURCE_SERVER_NAME}-restored"
                 fi
 
@@ -267,6 +303,7 @@ stages:
               SOURCE_SERVER_NAME: ${{ parameters.sourceServerName }}
               SOURCE_RESOURCE_GROUP: ${{ parameters.sourceResourceGroup }}
               RESTORED_SERVER_NAME: ${{ parameters.restoredServerName }}
+              RESTORE_MODE: ${{ parameters.restoreMode }}
               DRY_RUN: ${{ parameters.dryRun }}
 
   # ---------------------------------------------------------------------------
@@ -301,6 +338,7 @@ stages:
             env:
               VAULT_RESOURCE_GROUP: ${{ parameters.vaultResourceGroup }}
               VAULT_NAME: ${{ parameters.vaultName }}
+              SOURCE_SERVER_NAME: ${{ parameters.sourceServerName }}
               BACKUP_INSTANCE_NAME: ${{ parameters.backupInstanceName }}
               BACKUP_INSTANCE_FRIENDLY_NAME_FILTER: ${{ parameters.backupInstanceFriendlyNameFilter }}
               RECOVERY_POINT_ID: ${{ parameters.recoveryPointId }}
