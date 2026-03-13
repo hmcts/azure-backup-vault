@@ -1,0 +1,473 @@
+name: Azure Backup Vault Restore - CNP
+
+trigger: none
+pr: none
+
+variables:
+  - group: cnp-backup-vault-restore-secrets
+  # Pre-provisioned by Terraform - the only permitted restore target for CNP.
+  # Must match the storage account deployed by the azure-backup-vault Terraform module.
+  # See docs/architecture-decisions.md ADR-002.
+  - name: cnpRestoreStorageAccount
+    value: 'cnpvaultrestorationsprod'
+
+parameters:
+  - name: serviceConnection
+    type: string
+    default: DCD-CNP-Prod
+  - name: agentPool
+    type: string
+  - name: sourceServerName
+    type: string
+  - name: sourceResourceGroup
+    type: string
+  # Subscription ID or name where the source Postgres server lives.
+  # Leave as 'none' when the source server is in the same subscription as the
+  # service connection. Required when restoring cross-subscription (e.g. the
+  # vault is in prod but the source server is in a dev subscription).
+  - name: sourceSubscription
+    type: string
+    default: 'none'
+  - name: restoredServerName
+    type: string
+    # 'auto' generates the name as "${sourceServerName}-restore-<mhddmmyy>".
+    # Works for all restoreModes that create or target a Postgres server (all, database-only).
+    # Ignored for vault-only (no server is created or targeted).
+    default: 'auto'
+  - name: vaultResourceGroup
+    type: string
+  - name: vaultName
+    type: string
+  # Subscription ID or name where the backup vault lives.
+  # Leave as 'none' when the vault is in the same subscription as the service
+  # connection. Required when the vault subscription differs (e.g. a shared
+  # mgmt subscription hosting the vault while the service connection defaults
+  # to a workload subscription).
+  - name: vaultSubscription
+    type: string
+    default: 'none'
+  # Override: exact backup-instance name in Azure Backup Vault (e.g.
+  # "my-server-backup-instance" — visible in the Backup vault → Backup instances
+  # list, or via: az dataprotection backup-instance list -g <rg> --vault-name <vault> -o table).
+  # Leave as 'none' to auto-match on sourceServerName (recommended).
+  # Only needed if auto-match is ambiguous or the name doesn't contain the server name.
+  # Ignored for restoreMode=database-only.
+  - name: backupInstanceName
+    type: string
+    default: 'none'
+  # Override: regex/substring matched case-insensitively against backup instance
+  # friendlyName (the default naming convention is "${serverName}-backup-instance").
+  # Leave as 'none' to auto-match on sourceServerName (recommended).
+  # Only needed if you want a different match pattern than the server name.
+  # Ignored for restoreMode=database-only.
+  - name: backupInstanceFriendlyNameFilter
+    type: string
+    default: 'none'
+  # Recovery point identifier. Leave as 'none' to restore from the most recent
+  # available recovery point (recommended default).
+  # Provide a specific ID to pin to an exact point. Ignored for restoreMode=database-only.
+  - name: recoveryPointId
+    type: string
+    default: 'none'
+  # ISO-8601 UTC timestamp (e.g. '2026-03-10T02:00:00Z'). Leave as 'none' to
+  # restore from the most recent available recovery point (recommended default).
+  # When provided, selects the latest recovery point at or before this time.
+  # Provide this OR recoveryPointId, not both. Ignored for restoreMode=database-only.
+  - name: recoveryPointTimeUtc
+    type: string
+    default: 'none'
+  - name: restoreLocation
+    type: string
+    default: uksouth
+  - name: restoreTimeoutMinutes
+    type: number
+    default: 240
+  - name: pollSeconds
+    type: number
+    default: 30
+  # dryRun and restoreMode are independent controls. dryRun=true performs
+  # read-only discovery scoped to the chosen restoreMode, prints a command
+  # preview, then exits without modifying any Azure resource or database.
+  # All three restoreMode values support dryRun=true:
+  #   all          → discovers vault instances, recovery points, and blobs
+  #   vault-only   → discovers vault instances and recovery points only
+  #   database-only → discovers blobs in existingRestoreContainer only
+  - name: dryRun
+    type: boolean
+    default: true
+  - name: restoreMode
+    type: string
+    default: all
+    values:
+      - all
+      - vault-only
+      - database-only
+  # Required when restoreMode=database-only (supply the pre-existing blob
+  # container that holds the backup files). Ignored for all other modes.
+  # Must be provided even when dryRun=true so blob discovery can run.
+  - name: existingRestoreContainer
+    type: string
+    default: 'none'
+  - name: restoreRoles
+    type: boolean
+    default: true
+  - name: targetPostgresPort
+    type: string
+    default: '5432'
+
+stages:
+  # ---------------------------------------------------------------------------
+  # Stage 1: Provision
+  # Creates the restore storage container and the new Postgres Flexible Server.
+  # Passes container name and server FQDN as output variables to Stage 2.
+  # ---------------------------------------------------------------------------
+  - stage: Provision
+    displayName: 'Stage 1: Provision restore resources'
+    jobs:
+      - job: ProvisionResources
+        displayName: Create container and restored Postgres server
+        pool:
+          name: ${{ parameters.agentPool }}
+        steps:
+          - checkout: self
+
+          - script: |
+              echo "============================================================"
+              echo " Pipeline Inputs - CNP Restore"
+              echo "============================================================"
+              echo "dryRun:                           ${{ parameters.dryRun }}"
+              echo "sourceServerName:                 ${{ parameters.sourceServerName }}"
+              echo "sourceResourceGroup:              ${{ parameters.sourceResourceGroup }}"
+              echo "restoredServerName:               ${{ parameters.restoredServerName }} (empty = auto)"
+              echo "vaultResourceGroup:               ${{ parameters.vaultResourceGroup }}"
+              echo "vaultName:                        ${{ parameters.vaultName }}"
+              echo "backupInstanceName:               ${{ parameters.backupInstanceName }}"
+              echo "backupInstanceFriendlyNameFilter: ${{ parameters.backupInstanceFriendlyNameFilter }}"
+              echo "recoveryPointId:                  ${{ parameters.recoveryPointId }}"
+              echo "recoveryPointTimeUtc:             ${{ parameters.recoveryPointTimeUtc }}"
+              echo "restoreLocation:                  ${{ parameters.restoreLocation }}"
+              echo "targetPostgresPort:               ${{ parameters.targetPostgresPort }}"
+              echo "restoreMode:                      ${{ parameters.restoreMode }}"
+              echo "existingRestoreContainer:         ${{ parameters.existingRestoreContainer }} (only used for database-only mode)"
+              echo "restoreRoles:                     ${{ parameters.restoreRoles }}"
+              echo "restoreTimeoutMinutes:            ${{ parameters.restoreTimeoutMinutes }}"
+              echo "pollSeconds:                      ${{ parameters.pollSeconds }}"
+              echo "restoreStorageAccount:            $(cnpRestoreStorageAccount)"
+              echo "============================================================"
+            displayName: Print pipeline inputs
+
+          - task: AzureCLI@2
+            name: createContainer
+            displayName: Create restore storage container
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+
+                if [[ "${RESTORE_MODE}" == "database-only" ]]; then
+                  if [[ -z "${EXISTING_RESTORE_CONTAINER}" || "${EXISTING_RESTORE_CONTAINER}" == "none" ]]; then
+                    echo "ERROR: existingRestoreContainer must be supplied when restoreMode=database-only"
+                    exit 1
+                  fi
+                  echo "database-only mode: using existing container: ${EXISTING_RESTORE_CONTAINER}"
+                  echo "##vso[task.setvariable variable=restoreContainerName;isOutput=true]${EXISTING_RESTORE_CONTAINER}"
+                  exit 0
+                fi
+
+                # Strip everything except lowercase alphanumeric — no separators between parts
+                SERVER_SLUG=$(echo "${SOURCE_SERVER_NAME}" \
+                  | tr '[:upper:]' '[:lower:]' \
+                  | sed 's/[^a-z0-9]//g')
+                TIMESTAMP=$(date -u +"%M%H%d%m%y")
+                CONTAINER_NAME="${SERVER_SLUG}${TIMESTAMP}${BUILD_ID}"
+
+                # Validate container name before use
+                if [[ ${#CONTAINER_NAME} -ge 63 ]]; then
+                  echo "WARNING: Container name exceeded 63 characters (${#CONTAINER_NAME} chars), truncating: ${CONTAINER_NAME}"
+                  CONTAINER_NAME="${CONTAINER_NAME:0:63}"
+                  echo "WARNING: Truncated container name: ${CONTAINER_NAME}"
+                fi
+                if [[ "${CONTAINER_NAME}" =~ [' '._-] ]]; then
+                  echo "ERROR: Container name must not contain spaces, hyphens, dots or underscores: ${CONTAINER_NAME}"
+                  exit 1
+                fi
+
+                if [[ "${DRY_RUN,,}" == "true" ]]; then
+                  echo "[DRY RUN] Would create container: ${CONTAINER_NAME}"
+                  echo "[DRY RUN]   in storage account:  ${RESTORE_STORAGE_ACCOUNT}"
+                  echo "##vso[task.setvariable variable=restoreContainerName;isOutput=true]${CONTAINER_NAME}dryrun"
+                  exit 0
+                fi
+
+                az storage container create \
+                  --account-name "${RESTORE_STORAGE_ACCOUNT}" \
+                  --name "${CONTAINER_NAME}" \
+                  --auth-mode login \
+                  --output none
+
+                echo "Created container: ${CONTAINER_NAME}"
+                echo "##vso[task.setvariable variable=restoreContainerName;isOutput=true]${CONTAINER_NAME}"
+            env:
+              SOURCE_SERVER_NAME: ${{ parameters.sourceServerName }}
+              RESTORE_STORAGE_ACCOUNT: $(cnpRestoreStorageAccount)
+              DRY_RUN: ${{ parameters.dryRun }}
+              BUILD_ID: $(Build.BuildId)
+              RESTORE_MODE: ${{ parameters.restoreMode }}
+              EXISTING_RESTORE_CONTAINER: ${{ parameters.existingRestoreContainer }}
+
+          - task: AzureCLI@2
+            name: createPostgresServer
+            displayName: Create or resolve restored Postgres server
+            condition: ne('${{ parameters.restoreMode }}', 'vault-only')
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+
+                echo "Fetching source server config: ${SOURCE_SERVER_NAME} in ${SOURCE_RESOURCE_GROUP}"
+                _SOURCE_SUB_FLAG=""
+                if [[ -n "${SOURCE_SUBSCRIPTION:-}" && "${SOURCE_SUBSCRIPTION}" != "none" ]]; then
+                  _SOURCE_SUB_FLAG="--subscription ${SOURCE_SUBSCRIPTION}"
+                fi
+                # shellcheck disable=SC2086
+                SOURCE=$(az postgres flexible-server show \
+                  --name "${SOURCE_SERVER_NAME}" \
+                  --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                  ${_SOURCE_SUB_FLAG} \
+                  -o json)
+
+                SKU_NAME=$(echo "$SOURCE"    | jq -r '.sku.name')
+                SKU_TIER=$(echo "$SOURCE"    | jq -r '.sku.tier')
+                VERSION=$(echo "$SOURCE"     | jq -r '.version')
+                STORAGE_GB=$(echo "$SOURCE"  | jq -r '.storage.storageSizeGb')
+                SUBNET_ID=$(echo "$SOURCE"   | jq -r '.network.delegatedSubnetResourceId')
+                DNS_ZONE_ID=$(echo "$SOURCE" | jq -r '.network.privateDnsZoneArmResourceId')
+                SOURCE_LOCATION=$(echo "$SOURCE" | jq -r '.location' | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+
+                echo "Source server config:"
+                echo "  SKU:      ${SKU_NAME} (${SKU_TIER})"
+                echo "  Version:  ${VERSION}"
+                echo "  Storage:  ${STORAGE_GB}GB"
+                echo "  Location: ${SOURCE_LOCATION}"
+                echo "  Subnet:   ${SUBNET_ID}"
+                echo "  DNS zone: ${DNS_ZONE_ID}"
+                echo "NOTE: High Availability is intentionally disabled on the restored server (ADR-001 in docs/architecture-decisions.md)"
+
+                RESTORED_NAME="${RESTORED_SERVER_NAME}"
+                if [[ -z "${RESTORED_NAME}" || "${RESTORED_NAME}" == "auto" ]]; then
+                  RESTORED_NAME="${SOURCE_SERVER_NAME}-restore-$(date -u +"%M%H%d%m%y")"
+                fi
+
+                EXPECTED_FQDN="${RESTORED_NAME}.postgres.database.azure.com"
+
+                if [[ "${DRY_RUN,,}" == "true" ]]; then
+                  echo "[DRY RUN] Would create Postgres server: ${RESTORED_NAME} in ${SOURCE_RESOURCE_GROUP}"
+                  echo "[DRY RUN] az postgres flexible-server create \\"
+                  echo "  --resource-group ${SOURCE_RESOURCE_GROUP} \\"
+                  echo "  --name ${RESTORED_NAME} \\"
+                  echo "  --location ${SOURCE_LOCATION} \\"
+                  echo "  --sku-name ${SKU_NAME} --tier ${SKU_TIER} \\"
+                  echo "  --version ${VERSION} --storage-size ${STORAGE_GB} \\"
+                  echo "  --subnet ${SUBNET_ID} \\"
+                  echo "  --private-dns-zone ${DNS_ZONE_ID} \\"
+                  echo "  --high-availability Disabled"
+                  [[ -n "${_SOURCE_SUB_FLAG}" ]] && echo "  ${_SOURCE_SUB_FLAG}"
+                  echo "##vso[task.setvariable variable=restoredServerFqdn;isOutput=true]${EXPECTED_FQDN}"
+                  exit 0
+                fi
+
+                # shellcheck disable=SC2086
+                EXISTING=$(az postgres flexible-server show \
+                  --name "${RESTORED_NAME}" \
+                  --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                  ${_SOURCE_SUB_FLAG} \
+                  -o json 2>/dev/null || echo "")
+
+                if [[ -n "${EXISTING}" ]]; then
+                  echo "Server ${RESTORED_NAME} already exists, skipping creation."
+                else
+                  # shellcheck disable=SC2086
+                  az postgres flexible-server create \
+                    --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                    --name "${RESTORED_NAME}" \
+                    --location "${SOURCE_LOCATION}" \
+                    --sku-name "${SKU_NAME}" \
+                    --tier "${SKU_TIER}" \
+                    --version "${VERSION}" \
+                    --storage-size "${STORAGE_GB}" \
+                    --subnet "${SUBNET_ID}" \
+                    --private-dns-zone "${DNS_ZONE_ID}" \
+                    --high-availability Disabled \
+                    --admin-user "$(targetPostgresAdminUser)" \
+                    --admin-password "$(targetPostgresAdminPassword)" \
+                    ${_SOURCE_SUB_FLAG}
+                fi
+
+                echo "Restored server FQDN: ${EXPECTED_FQDN}"
+                echo "##vso[task.setvariable variable=restoredServerFqdn;isOutput=true]${EXPECTED_FQDN}"
+            env:
+              SOURCE_SERVER_NAME: ${{ parameters.sourceServerName }}
+              SOURCE_RESOURCE_GROUP: ${{ parameters.sourceResourceGroup }}
+              SOURCE_SUBSCRIPTION: ${{ parameters.sourceSubscription }}
+              RESTORED_SERVER_NAME: ${{ parameters.restoredServerName }}
+              RESTORE_MODE: ${{ parameters.restoreMode }}
+              DRY_RUN: ${{ parameters.dryRun }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 2: Restore
+  # Runs the restore script to move the backup from vault to blob storage and
+  # then restore it onto the new Postgres instance.
+  # ---------------------------------------------------------------------------
+  - stage: Restore
+    displayName: 'Stage 2: Restore backup to database'
+    dependsOn: Provision
+    variables:
+      restoreContainerName: $[ stageDependencies.Provision.ProvisionResources.outputs['createContainer.restoreContainerName'] ]
+      restoredServerFqdn: $[ stageDependencies.Provision.ProvisionResources.outputs['createPostgresServer.restoredServerFqdn'] ]
+    jobs:
+      - job: TriggerAndTrackRestore
+        displayName: Trigger and track restore
+        timeoutInMinutes: 360
+        pool:
+          name: ${{ parameters.agentPool }}
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: Execute backup-vault restore automation
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                ./scripts/restore-postgresql-flex-from-backup-vault.sh
+            env:
+              VAULT_RESOURCE_GROUP: ${{ parameters.vaultResourceGroup }}
+              VAULT_NAME: ${{ parameters.vaultName }}
+              VAULT_SUBSCRIPTION: ${{ parameters.vaultSubscription }}
+              SOURCE_SERVER_NAME: ${{ parameters.sourceServerName }}
+              BACKUP_INSTANCE_NAME: ${{ parameters.backupInstanceName }}
+              BACKUP_INSTANCE_FRIENDLY_NAME_FILTER: ${{ parameters.backupInstanceFriendlyNameFilter }}
+              RECOVERY_POINT_ID: ${{ parameters.recoveryPointId }}
+              RECOVERY_POINT_TIME_UTC: ${{ parameters.recoveryPointTimeUtc }}
+              RESTORE_LOCATION: ${{ parameters.restoreLocation }}
+              TARGET_STORAGE_ACCOUNT: $(cnpRestoreStorageAccount)
+              TARGET_STORAGE_CONTAINER: $(restoreContainerName)
+              RESTORE_TIMEOUT_MINUTES: ${{ parameters.restoreTimeoutMinutes }}
+              POLL_SECONDS: ${{ parameters.pollSeconds }}
+              DRY_RUN: ${{ parameters.dryRun }}
+              RESTORE_MODE: ${{ parameters.restoreMode }}
+              RESTORE_ROLES: ${{ parameters.restoreRoles }}
+              TARGET_POSTGRES_HOST: $(restoredServerFqdn)
+              TARGET_POSTGRES_ADMIN_USER: $(targetPostgresAdminUser)
+              TARGET_POSTGRES_ADMIN_PASSWORD: $(targetPostgresAdminPassword)
+              TARGET_POSTGRES_PORT: ${{ parameters.targetPostgresPort }}
+
+          - task: PublishBuildArtifacts@1
+            displayName: Publish restore metrics and logs
+            condition: always()
+            inputs:
+              PathtoPublish: restore-output
+              ArtifactName: restore-output
+              publishLocation: Container
+
+  # ---------------------------------------------------------------------------
+  # Stage 3: Validate
+  # Connects to the restored Postgres server and enumerates all user databases,
+  # printing schema/table/row-count information for each one to confirm the
+  # instance restore is complete with real data.
+  # Skipped when dryRun=true (no server was provisioned). See ADR-007.
+  # ---------------------------------------------------------------------------
+  - stage: Validate
+    displayName: 'Stage 3: Validate restored databases'
+    dependsOn:
+      - Provision
+      - Restore
+    condition: and(succeeded('Restore'), eq('${{ parameters.dryRun }}', 'false'), ne('${{ parameters.restoreMode }}', 'vault-only'))
+    variables:
+      restoredServerFqdn: $[ stageDependencies.Provision.ProvisionResources.outputs['createPostgresServer.restoredServerFqdn'] ]
+    jobs:
+      - job: ValidateRestore
+        displayName: Validate restored Postgres databases
+        pool:
+          name: ${{ parameters.agentPool }}
+        steps:
+          - task: AzureCLI@2
+            displayName: Validate restored database content
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+
+                if ! command -v psql >/dev/null 2>&1; then
+                  echo "Installing PostgreSQL client tools"
+                  sudo apt-get update -y -q
+                  sudo apt-get install -y -q postgresql-client
+                fi
+
+                export PGPASSWORD="${TARGET_POSTGRES_ADMIN_PASSWORD}"
+                ADMIN_CONN="host=${TARGET_POSTGRES_HOST} port=${TARGET_POSTGRES_PORT} user=${TARGET_POSTGRES_ADMIN_USER} dbname=postgres sslmode=require"
+
+                USER_DBS=$(psql "$ADMIN_CONN" -tA -c "
+                  SELECT datname FROM pg_database
+                  WHERE datistemplate = false
+                    AND datname NOT IN ('postgres', 'azure_maintenance', 'azure_sys')
+                  ORDER BY datname;")
+
+                if [[ -z "$USER_DBS" ]]; then
+                  echo "ERROR: No user databases found on restored server. Restore may have been incomplete."
+                  exit 1
+                fi
+
+                echo "============================================================"
+                echo " User databases on restored server"
+                echo "============================================================"
+                echo "$USER_DBS" | while IFS= read -r db; do echo "  - ${db}"; done
+                echo ""
+
+                while IFS= read -r db; do
+                  [[ -z "$db" ]] && continue
+                  DB_CONN="host=${TARGET_POSTGRES_HOST} port=${TARGET_POSTGRES_PORT} user=${TARGET_POSTGRES_ADMIN_USER} dbname=${db} sslmode=require"
+
+                  echo "============================================================"
+                  echo " Database: ${db}"
+                  echo "============================================================"
+
+                  echo "Schemas:"
+                  psql "$DB_CONN" -c "\dn+"
+
+                  echo ""
+                  echo "Tables:"
+                  psql "$DB_CONN" -c "\dt *.*"
+
+                  echo ""
+                  echo "Row counts per user table (descending):"
+                  psql "$DB_CONN" -t -A -c "
+                    SELECT schemaname || '.' || relname AS table_name,
+                           n_live_tup AS estimated_rows
+                    FROM pg_stat_user_tables
+                    ORDER BY n_live_tup DESC;"
+
+                  echo ""
+                  echo "Totals:"
+                  psql "$DB_CONN" -t -A -c "
+                    SELECT COUNT(*)                          AS total_tables,
+                           COALESCE(SUM(n_live_tup), 0) AS total_estimated_rows
+                    FROM pg_stat_user_tables;"
+
+                  echo ""
+                done <<< "$USER_DBS"
+
+                echo "Validation complete. Non-zero total_tables and total_estimated_rows per database confirm data beyond a blank instance."
+            env:
+              TARGET_POSTGRES_HOST: $(restoredServerFqdn)
+              TARGET_POSTGRES_PORT: ${{ parameters.targetPostgresPort }}
+              TARGET_POSTGRES_ADMIN_USER: $(targetPostgresAdminUser)
+              TARGET_POSTGRES_ADMIN_PASSWORD: $(targetPostgresAdminPassword)
