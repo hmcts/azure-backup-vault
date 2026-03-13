@@ -197,7 +197,7 @@ main() {
   local request_file="restore-output/restore-request.json"
   local trigger_file="restore-output/restore-trigger.json"
   local target_container_uri="https://${TARGET_STORAGE_ACCOUNT}.blob.core.windows.net/${TARGET_STORAGE_CONTAINER}"
-  local restore_target_file_name="${target_file_prefix}-$(date -u +"%Y%m%d%H%M%S")"
+  local restore_target_file_name="${target_file_prefix}-$(date -u +"%M%H%d%m%y")"
 
   if [[ "${dry_run,,}" == "true" ]]; then
     log "DRY_RUN=true: mutating Azure/PostgreSQL commands are disabled."
@@ -286,7 +286,7 @@ main() {
       cat <<EOF
 [DRY RUN PREVIEW] az dataprotection backup-instance restore initialize-for-data-recovery-as-files --datasource-type AzureDatabaseForPostgreSQLFlexibleServer --restore-location "${RESTORE_LOCATION}" --source-datastore VaultStore --target-blob-container-url "${target_container_uri}" --target-file-name "${restore_target_file_name}" --recovery-point-id "${selected_recovery_point_id:-<resolved-rp>}" > "${request_file}"
 [DRY RUN PREVIEW] az dataprotection backup-instance restore trigger -g "${VAULT_RESOURCE_GROUP}" --vault-name "${VAULT_NAME}" --backup-instance-name "${selected_instance_name:-<resolved-instance>}" --restore-request-object "${request_file}" ${vault_sub_flag} -o json > "${trigger_file}"
-[DRY RUN PREVIEW] az dataprotection job show -g "${VAULT_RESOURCE_GROUP}" --vault-name "${VAULT_NAME}" --name "<restore-job-name>" ${vault_sub_flag} -o json (polled every ${poll_seconds}s, timeout ${restore_timeout_minutes}m)
+[DRY RUN PREVIEW] az dataprotection job show --ids "<restore-job-arm-id>" -o json (polled every ${poll_seconds}s, timeout ${restore_timeout_minutes}m)
 [DRY RUN PREVIEW] Write vault restore metrics to "${metrics_file}"
 EOF
     fi
@@ -370,26 +370,27 @@ EOF
     $vault_sub_flag \
     -o json > "$trigger_file"
 
-  local restore_job_name
-  restore_job_name=$(jq -r '.name // .jobId // (.id | split("/") | last) // empty' "$trigger_file")
+  # The trigger response .name field is the full ARM resource ID.
+  # Extract the trailing GUID (after the last '/') for logging and metrics.
+  local restore_job_arm_id
+  restore_job_arm_id=$(jq -r '.name // .jobId // .id // empty' "$trigger_file")
 
-  if [[ -z "$restore_job_name" ]]; then
-    fail "Unable to resolve restore job name from trigger response"
+  if [[ -z "$restore_job_arm_id" ]]; then
+    fail "Unable to resolve restore job from trigger response"
   fi
 
-  log "Restore job started: ${restore_job_name}"
+  local restore_job_name
+  restore_job_name="${restore_job_arm_id##*/}"
+
+  log "Restore job started: ${restore_job_arm_id}"
 
   local deadline_epoch=$((started_epoch + (restore_timeout_minutes * 60)))
   local job_state="Unknown"
   local job_details_file="restore-output/restore-job-details.json"
 
   while true; do
-    # shellcheck disable=SC2086
     az dataprotection job show \
-      -g "$VAULT_RESOURCE_GROUP" \
-      --vault-name "$VAULT_NAME" \
-      --ids "$restore_job_name" \
-      $vault_sub_flag \
+      --ids "$restore_job_arm_id" \
       -o json > "$job_details_file"
 
     job_state=$(jq -r '.properties.status // .status // "Unknown"' "$job_details_file")

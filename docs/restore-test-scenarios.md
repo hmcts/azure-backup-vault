@@ -69,6 +69,8 @@ Run in order. Verify each checkpoint before proceeding to the next scenario.
 ### Scenario 2.1 — Live vault-only restore
 
 > Note the container name from the pipeline logs — required for Scenario 3.1 and 3.2.
+> Container names follow the pattern `<serverslug><buildId><mhddmmyy>` (all lowercase alphanumeric, no separators), e.g. `plumv14flexiblesandbox12345637101326`.
+> Look for the `Created container:` log line in the Stage 1 **Create restore storage container** step.
 
 | Parameter | Value |
 |---|---|
@@ -86,12 +88,12 @@ Run in order. Verify each checkpoint before proceeding to the next scenario.
 
 | Checkpoint | Expected | Status |
 |---|---|---|
-| Container visible in storage account | Container exists with generated name | — |
-| `*_database_*.sql` blobs present | One blob per source database | — |
-| `*_roles.sql` blob present | Single roles blob | — |
-| Blob count matches source database count + 1 | e.g. 3 databases → 4 blobs | — |
-| Stage 3 skipped | Validate stage not executed | — |
-| `restore-metrics.json` artifact contains vault job details | `restoreJobStatus: Completed` | — |
+| Container visible in storage account | Container exists with generated name | ✅ Container created |
+| `*_database_*.sql` blobs present | One blob per source database | ✅ Blobs present |
+| `*_roles.sql` blob present | Single roles blob | ✅ Roles blob present |
+| Blob count matches source database count + 1 | e.g. 3 databases → 4 blobs | ✅ Confirmed |
+| Stage 3 skipped | Validate stage not executed | ✅ vault-only mode — no DB stage |
+| `restore-metrics.json` artifact contains vault job details | `restoreJobStatus: Completed` | ✅ `acef2018-de2b-4e03-874c-3974a6fbb36e` → `Completed` (~2.5 min) |
 
 ---
 
@@ -107,7 +109,7 @@ Run in order. Verify each checkpoint before proceeding to the next scenario.
 | `existingRestoreContainer` | `<container-name-from-scenario-2.1>` |
 | `sourceServerName` | `<your-source-server>` |
 | `sourceResourceGroup` | `<rg>` |
-| `restoredServerName` | `<name-of-server-from-scenario-2.1>` — must not be `'auto'` for `database-only` mode |
+| `restoredServerName` | `'auto'` (derives `<sourceServerName>-restore-<mhddmmyy>`) or an explicit name if the server was created with a custom name |
 
 **Expected:** Lists all `_database_*.sql` blobs and the roles blob in the existing container. No server provisioned, no DB changes.
 
@@ -129,7 +131,7 @@ Run in order. Verify each checkpoint before proceeding to the next scenario.
 | `existingRestoreContainer` | `<container-name-from-scenario-2.1>` |
 | `sourceServerName` | `<your-source-server>` |
 | `sourceResourceGroup` | `<rg>` |
-| `restoredServerName` | `<name-of-server-from-scenario-2.1>` — must not be `'auto'` for `database-only` mode |
+| `restoredServerName` | `'auto'` (derives `<sourceServerName>-restore-<mhddmmyy>`) or an explicit name if the server was created with a custom name |
 
 **Expected:** Provisions the restored Postgres server, replays roles once, then loops over every database blob — creating each DB and restoring it. Stage 3 validates all user databases.
 

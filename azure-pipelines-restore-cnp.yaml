@@ -30,8 +30,9 @@ parameters:
     default: 'none'
   - name: restoredServerName
     type: string
-    # 'auto' generates the name as "${sourceServerName}-restored".
-    # Required (must not be 'auto') when restoreMode=database-only.
+    # 'auto' generates the name as "${sourceServerName}-restore-<mhddmmyy>".
+    # Works for all restoreModes that create or target a Postgres server (all, database-only).
+    # Ignored for vault-only (no server is created or targeted).
     default: 'auto'
   - name: vaultResourceGroup
     type: string
@@ -179,7 +180,7 @@ stages:
                 SERVER_SLUG=$(echo "${SOURCE_SERVER_NAME}" \
                   | tr '[:upper:]' '[:lower:]' \
                   | sed 's/[^a-z0-9]//g')
-                TIMESTAMP=$(date -u +"%Y%m%d%H%M%S")
+                TIMESTAMP=$(date -u +"%M%H%d%m%y")
                 CONTAINER_NAME="${SERVER_SLUG}${BUILD_ID}${TIMESTAMP}"
 
                 # Validate container name before use
@@ -227,17 +228,16 @@ stages:
               inlineScript: |
                 set -euo pipefail
 
-                # For database-only mode the server was already created by a prior
-                # vault-only run. Skip source-server lookup and creation entirely;
-                # just compute the FQDN from restoredServerName (mandatory here).
+                # For database-only mode the server must already exist (created by a prior
+                # all or database-only run). Skip source-server lookup and creation entirely;
+                # just compute the FQDN from restoredServerName.
                 if [[ "${RESTORE_MODE}" == "database-only" ]]; then
-                  if [[ -z "${RESTORED_SERVER_NAME}" || "${RESTORED_SERVER_NAME}" == "auto" ]]; then
-                    echo "ERROR: restoredServerName must be explicitly provided when restoreMode=database-only."
-                    echo "ERROR: Specify the name of the server created by the previous vault-only restore run."
-                    exit 1
+                  RESOLVED_NAME="${RESTORED_SERVER_NAME}"
+                  if [[ -z "${RESOLVED_NAME}" || "${RESOLVED_NAME}" == "auto" ]]; then
+                    RESOLVED_NAME="${SOURCE_SERVER_NAME}-restore-$(date -u +"%M%H%d%m%y")"
                   fi
-                  EXPECTED_FQDN="${RESTORED_SERVER_NAME}.postgres.database.azure.com"
-                  echo "database-only mode: target server '${RESTORED_SERVER_NAME}' (assumed pre-existing from prior vault-only run)"
+                  EXPECTED_FQDN="${RESOLVED_NAME}.postgres.database.azure.com"
+                  echo "database-only mode: target server '${RESOLVED_NAME}' (assumed pre-existing from prior restore run)"
                   echo "Target FQDN: ${EXPECTED_FQDN}"
                   echo "##vso[task.setvariable variable=restoredServerFqdn;isOutput=true]${EXPECTED_FQDN}"
                   exit 0
@@ -274,7 +274,7 @@ stages:
 
                 RESTORED_NAME="${RESTORED_SERVER_NAME}"
                 if [[ -z "${RESTORED_NAME}" || "${RESTORED_NAME}" == "auto" ]]; then
-                  RESTORED_NAME="${SOURCE_SERVER_NAME}-restored"
+                  RESTORED_NAME="${SOURCE_SERVER_NAME}-restore-$(date -u +"%M%H%d%m%y")"
                 fi
 
                 EXPECTED_FQDN="${RESTORED_NAME}.postgres.database.azure.com"
