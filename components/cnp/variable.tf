@@ -16,7 +16,11 @@ variable "expiresAfter" {
 variable "sharedservicesptl_subscription_id" {
   description = "The subscription ID for DTS-SHAREDSERVICESPTL where managed identities are located"
   type        = string
-  default     = "6c4d2513-a873-41b4-afdd-b05a33206631"
+}
+
+variable "cftptl_subscription_id" {
+  description = "The subscription ID for DTS-CFTPTL-INTSVC"
+  type        = string
 }
 
 variable "backup_vaults" {
