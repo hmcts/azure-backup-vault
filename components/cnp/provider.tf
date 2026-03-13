@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.7.5"
+  required_version = ">= 1.14.4"
 
   backend "azurerm" {} # cconfiguration provided at pipeline level
 
