@@ -253,19 +253,40 @@ main() {
 
     if [[ "$restore_scope" != "vault-only" ]]; then
       local blobs_json
-      # The container may not exist in a dry run (Stage 1 skips creation).
-      # Fall back to an empty list so discovery logs "<not found>" rather than aborting.
+      # The container may not exist in a dry run for all/vault-only (Stage 1 skips creation).
+      # For database-only the container is pre-existing, so a real listing is expected.
+      # Capture stderr separately so we can surface failures without aborting.
+      local blob_list_err
+      blob_list_err=$(mktemp)
       blobs_json=$(az storage blob list \
         --account-name "$TARGET_STORAGE_ACCOUNT" \
         --container-name "$TARGET_STORAGE_CONTAINER" \
         --auth-mode login \
-        -o json 2>/dev/null) || blobs_json="[]"
+        -o json 2>"$blob_list_err") || {
+          local _err; _err=$(cat "$blob_list_err")
+          if [[ "$restore_scope" == "database-only" ]]; then
+            warn "Blob listing failed for existing container '${TARGET_STORAGE_CONTAINER}': ${_err}"
+          else
+            log "  Blob listing unavailable in dry run (container not yet created): ${_err:-unknown error}"
+          fi
+          blobs_json="[]"
+        }
+      rm -f "$blob_list_err"
 
       log "Blob discovery (read-only):"
+      # For database-only the blobs were written by a previous run — discover without
+      # prefix first, then narrow to prefix if there are results (same two-pass logic
+      # as the live path).
       local dry_db_blobs=()
-      while IFS= read -r blob; do
-        [[ -n "$blob" ]] && dry_db_blobs+=("$blob")
-      done < <(discover_all_database_blobs "$blobs_json" "$restore_target_file_name")
+      if [[ "$restore_scope" == "database-only" ]]; then
+        while IFS= read -r blob; do
+          [[ -n "$blob" ]] && dry_db_blobs+=("$blob")
+        done < <(discover_all_database_blobs "$blobs_json")
+      else
+        while IFS= read -r blob; do
+          [[ -n "$blob" ]] && dry_db_blobs+=("$blob")
+        done < <(discover_all_database_blobs "$blobs_json" "$restore_target_file_name")
+      fi
       if [[ ${#dry_db_blobs[@]} -eq 0 ]]; then
         log "  No database blobs found (container may not exist yet in dry run)"
       else
@@ -275,7 +296,11 @@ main() {
         done
       fi
       local roles_blob_name
-      roles_blob_name=$(discover_roles_blob "$blobs_json" "$restore_target_file_name")
+      if [[ "$restore_scope" == "database-only" ]]; then
+        roles_blob_name=$(discover_roles_blob "$blobs_json")
+      else
+        roles_blob_name=$(discover_roles_blob "$blobs_json" "$restore_target_file_name")
+      fi
       log "Selected roles blob: ${roles_blob_name:-<not found>}"
     else
       log "vault-only mode: skipping blob and database restore discovery."

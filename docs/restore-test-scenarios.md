@@ -69,7 +69,7 @@ Run in order. Verify each checkpoint before proceeding to the next scenario.
 ### Scenario 2.1 — Live vault-only restore
 
 > Note the container name from the pipeline logs — required for Scenario 3.1 and 3.2.
-> Container names follow the pattern `<serverslug><buildId><mhddmmyy>` (all lowercase alphanumeric, no separators), e.g. `plumv14flexiblesandbox12345637101326`.
+> Container names follow the pattern `<serverslug><mhddmmyy><buildId>` (all lowercase alphanumeric, no separators), e.g. `plumv14flexiblesandbox371013032612345`.
 > Look for the `Created container:` log line in the Stage 1 **Create restore storage container** step.
 
 | Parameter | Value |

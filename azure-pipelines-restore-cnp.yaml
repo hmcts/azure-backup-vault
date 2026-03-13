@@ -181,7 +181,7 @@ stages:
                   | tr '[:upper:]' '[:lower:]' \
                   | sed 's/[^a-z0-9]//g')
                 TIMESTAMP=$(date -u +"%M%H%d%m%y")
-                CONTAINER_NAME="${SERVER_SLUG}${BUILD_ID}${TIMESTAMP}"
+                CONTAINER_NAME="${SERVER_SLUG}${TIMESTAMP}${BUILD_ID}"
 
                 # Validate container name before use
                 if [[ ${#CONTAINER_NAME} -ge 63 ]]; then
