@@ -388,7 +388,7 @@ EOF
     az dataprotection job show \
       -g "$VAULT_RESOURCE_GROUP" \
       --vault-name "$VAULT_NAME" \
-      --name "$restore_job_name" \
+      --ids "$restore_job_name" \
       $vault_sub_flag \
       -o json > "$job_details_file"
 
