@@ -115,9 +115,9 @@ Run in order. Verify each checkpoint before proceeding to the next scenario.
 
 | Checkpoint | Expected | Status |
 |---|---|---|
-| Log lists same number of database blobs as verified in 2.1 | Blob count matches | — |
-| Roles blob identified | Roles blob name logged | — |
-| No Postgres server created | No server provisioning in log | — |
+| Log lists same number of database blobs as verified in 2.1 | Blob count matches | ✅ 6 blobs: `azure_maintenance`, `azure_sys`, `plum`, `postgres`, `rhubarb`, `template1` |
+| Roles blob identified | Roles blob name logged | ✅ `fbbb9707-..._roles.sql` |
+| No Postgres server created | No server provisioning in log | ✅ Confirmed — dry run only |
 
 ---
 

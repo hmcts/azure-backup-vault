@@ -228,21 +228,6 @@ stages:
               inlineScript: |
                 set -euo pipefail
 
-                # For database-only mode the server must already exist (created by a prior
-                # all or database-only run). Skip source-server lookup and creation entirely;
-                # just compute the FQDN from restoredServerName.
-                if [[ "${RESTORE_MODE}" == "database-only" ]]; then
-                  RESOLVED_NAME="${RESTORED_SERVER_NAME}"
-                  if [[ -z "${RESOLVED_NAME}" || "${RESOLVED_NAME}" == "auto" ]]; then
-                    RESOLVED_NAME="${SOURCE_SERVER_NAME}-restore-$(date -u +"%M%H%d%m%y")"
-                  fi
-                  EXPECTED_FQDN="${RESOLVED_NAME}.postgres.database.azure.com"
-                  echo "database-only mode: target server '${RESOLVED_NAME}' (assumed pre-existing from prior restore run)"
-                  echo "Target FQDN: ${EXPECTED_FQDN}"
-                  echo "##vso[task.setvariable variable=restoredServerFqdn;isOutput=true]${EXPECTED_FQDN}"
-                  exit 0
-                fi
-
                 echo "Fetching source server config: ${SOURCE_SERVER_NAME} in ${SOURCE_RESOURCE_GROUP}"
                 _SOURCE_SUB_FLAG=""
                 if [[ -n "${SOURCE_SUBSCRIPTION:-}" && "${SOURCE_SUBSCRIPTION}" != "none" ]]; then

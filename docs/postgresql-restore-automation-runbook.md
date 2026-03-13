@@ -37,19 +37,20 @@ Both pipelines expose identical parameters. The CNP pipeline registers against `
 
 | Value | Behaviour |
 |---|---|
-| `auto` (default) | Restored server is named `${sourceServerName}-restored`. Ignored when `restoreMode=vault-only` (no server is created). |
+| `auto` (default) | Restored server is named `${sourceServerName}-restore-<mhddmmyy>`. Ignored when `restoreMode=vault-only` (no server is created). |
 | Any explicit name | Uses that name for the restored server. |
-| **Required (not `auto`) for `database-only`** | The server was already created by a prior `vault-only` run; the script needs the exact name to derive the FQDN and skip source-server lookup entirely. |
+
+> `auto` works for `all` and `database-only` modes. In both modes the server is created from source server config if it does not already exist, or reused if it does.
 
 ### `restoreMode`
 
 | Value | What runs |
 |---|---|
-| `all` (default) | Stage 1: create blob container + Postgres server. Stage 2: vault restore → blob storage → all databases. Stage 3: validate. |
+| `all` (default) | Stage 1: create blob container + create Postgres server (if not exists). Stage 2: vault restore → blob storage → all databases. Stage 3: validate. |
 | `vault-only` | Stage 1: create blob container only (no server). Stage 2: vault restore to blob storage only. Stage 3: skipped. |
-| `database-only` | Stage 1: use `existingRestoreContainer`; derive server FQDN from `restoredServerName` (no source-server query, no server creation). Stage 2: restore all database blobs from container to Postgres. Stage 3: validate. |
+| `database-only` | Stage 1: create Postgres server (if not exists, using source server config). Stage 2: restore all database blobs from `existingRestoreContainer` to Postgres. Stage 3: validate. |
 
-**Two-phase restore workflow** (`vault-only` then `database-only`): run `vault-only` first to move backup files from the vault into blob storage, then run `database-only` supplying `existingRestoreContainer` (the container created in the first run) and an explicit `restoredServerName`. Useful when you want to inspect the blob contents before loading into Postgres, or need to re-run the database restore independently.
+**Two-phase restore workflow** (`vault-only` then `database-only`): run `vault-only` first to move backup files from the vault into blob storage, then run `database-only` supplying `existingRestoreContainer` (the container created in the first run). The server will be created automatically in the `database-only` run if it does not already exist. Useful when you want to inspect the blob contents before loading into Postgres, or need to re-run the database restore independently.
 
 ### `dryRun`
 
@@ -140,24 +141,40 @@ No new Service Principal is required. The existing ADO service connections (`DCD
 
 ### ADO service principal / workload identity
 
+Creating a PostgreSQL Flexible Server with private networking spans **three subscriptions** — the source server's subscription, the VNet/subnet subscription, and the private DNS zone subscription. The SP requires roles in all three.
+
+For CNP sandbox the confirmed resource locations are:
+
+| Resource | Subscription |
+|---|---|
+| Source Postgres server + resource group | `sourceSubscription` (e.g. `8999dec3-...`) |
+| Delegated subnet (`cft-sbox-network-rg / cft-sbox-vnet / postgres-expanded`) | `b72ab7b7-723f-4b18-b6f6-03b0f2c6a1bb` |
+| Private DNS zone (`private.postgres.database.azure.com` in `core-infra-intsvc-rg`) | `1baf5470-1c3e-40d3-a6f7-74bfbce4b348` |
+
 The pipeline performs the following Azure operations and requires the corresponding roles:
 
-| Operation | Stage | Required role | Scope |
-|---|---|---|---|
-| `az storage container create --auth-mode login` | 1 | `Storage Blob Data Contributor` | Restore storage account |
-| `az storage blob list --auth-mode login` | 2 | `Storage Blob Data Contributor` | Restore storage account |
-| `az storage blob download --auth-mode login` | 2 | `Storage Blob Data Contributor` | Restore storage account |
-| `az postgres flexible-server show` (read source config) | 1 | `Reader` | Source resource group |
-| `az postgres flexible-server create` | 1 | `Contributor` | Source resource group |
-| `az dataprotection backup-instance list/restore trigger` | 2 | `Backup Contributor` | Backup vault (or vault resource group) |
-| `az dataprotection recovery-point list` | 2 | `Backup Reader` | Backup vault (or vault resource group) |
+| Operation | Stage | Restore modes | Required role | Scope |
+|---|---|---|---|---|
+| `az storage container create --auth-mode login` | 1 | `all`, `vault-only` | `Contributor` (or `Storage Account Contributor`) | Restore storage account (or its resource group) |
+| `az storage blob list --auth-mode login` | 2 | `all`, `database-only` | `Storage Blob Data Reader` | Restore storage account |
+| `az storage blob download --auth-mode login` | 2 | `all`, `database-only` | `Storage Blob Data Reader` | Restore storage account |
+| `az postgres flexible-server show` (read source config) | 1 | `all`, `database-only` | `Reader` | Source resource group |
+| `az postgres flexible-server create` | 1 | `all`, `database-only` | `Contributor` | Source resource group |
+| `--subnet` join on new server | 1 | `all`, `database-only` | `Network Contributor` (or custom with `Microsoft.Network/virtualNetworks/subnets/join/action`) | Subnet / VNet resource group in networking subscription |
+| `--private-dns-zone` link on new server | 1 | `all`, `database-only` | `Private DNS Zone Contributor` (or custom with `privateDnsZones/join/action` + `virtualNetworkLinks/write`) | DNS zone resource group in DNS subscription |
+| `az dataprotection backup-instance list/restore trigger` | 2 | `all`, `vault-only` | `Backup Contributor` | Backup vault (or vault resource group) |
+| `az dataprotection recovery-point list` | 2 | `all`, `vault-only` | `Backup Reader` | Backup vault (or vault resource group) |
 | `az dataprotection job show` | 2 | `Backup Reader` | Backup vault (or vault resource group) |
 
-> **Critical:** `Storage Blob Data Contributor` is a **data-plane** role. Azure's built-in `Contributor` role at any scope explicitly excludes data-plane storage access. This role must be assigned explicitly on the restore storage account — it is not inherited from subscription or resource group `Contributor`.
+`az storage container create --auth-mode login` hits the blob service data-plane endpoint with an OAuth token, but Azure Storage authorises **container-level** operations against the management-plane RBAC action `Microsoft.Storage/storageAccounts/blobServices/containers/write`, which is included in `Contributor` and `Storage Account Contributor`. `Storage Blob Data Contributor` is **not** required for container creation.
+
+`Storage Blob Data Reader` is sufficient for blob listing and downloading (Stage 2 script operations). Container creation (Stage 1) is skipped in `database-only` mode, so `database-only` runs only need `Storage Blob Data Reader` on the restore storage account for blob operations. However `database-only` now also provisions the Postgres server (if absent), so it requires the same source-resource-group roles as `all` mode.
+
+> **Note:** `Storage Blob Data Reader` and `Storage Blob Data Contributor` are data-plane roles that must be assigned explicitly on the restore storage account — they are **not** inherited from subscription or resource group `Contributor`. The management-plane `Contributor` role does **not** grant blob read/write data-plane access.
 
 `Backup Contributor` covers all dataprotection read and write actions including triggering restores. `Backup Reader` is a subset; assign `Backup Contributor` and both are satisfied.
 
-`Contributor` on the source resource group covers both reading the source server config and creating the restored server.
+`Contributor` on the source resource group covers both reading the source server config and creating the restored server. The subnet and DNS zone roles must be assigned separately in their respective subscriptions — `Contributor` on the source resource group does not extend to resources in other subscriptions.
 
 ### Backup Vault managed identity
 
