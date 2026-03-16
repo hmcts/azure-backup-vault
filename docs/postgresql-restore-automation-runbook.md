@@ -206,11 +206,11 @@ For parallel test evidence, run two or more pipeline executions simultaneously w
 `restore-output/restore-metrics.json` contains:
 
 - `restoreDurationSeconds`: backup-vault restore (trigger to job completion)
-- `databaseRestore.databaseRestoreDurationSeconds`: optional storage-to-database restore duration
+- `totalDatabaseRestoreDurationSeconds`: total wall-clock time for all database restores combined (present when database phase ran)
 
 Use total observed RTO as:
 
-`restoreDurationSeconds + databaseRestoreDurationSeconds` (when database phase enabled).
+`restoreDurationSeconds + totalDatabaseRestoreDurationSeconds` (when database phase enabled).
 
 ## Immutability lock sequencing
 

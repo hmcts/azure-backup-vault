@@ -49,12 +49,13 @@ The restore storage account name is hardcoded as a `variables:` entry (`cnpResto
 Earlier pipeline versions accepted `targetStorageContainer` as a user-supplied parameter, risking name collisions between concurrent runs and requiring manual coordination.
 
 **Decision:**
-The container name is generated in Stage 1 as `restore-<serverSlug>-<buildId>-<timestamp>` and passed to Stage 2 via a pipeline output variable.
+The container name is generated in Stage 1 as `<serverSlug><timestamp><buildId>` (e.g. `plumv14flexiblesandbox104881520260313`) and passed to Stage 2 via a pipeline output variable. Separators are omitted because Azure Storage container names may only contain lowercase letters, digits, and hyphens — slugified server names already contain no hyphens, so concatenation is safe without post-processing.
 
 **Rationale:**
-- Guarantees uniqueness across concurrent pipeline runs.
-- Provides traceability: the container name encodes the source server, build, and time of restore.
+- Guarantees uniqueness across concurrent pipeline runs (build ID is unique per run).
+- Provides traceability: the container name encodes the source server, time, and build of restore.
 - Removes a potential operator error vector.
+- Separator-free format avoids Azure Storage character-set edge cases.
 
 ---
 
@@ -134,7 +135,9 @@ No teardown stage is included in the pipeline.
 The `dryRun` parameter gates all mutating operations in Stages 1 and 2. Stage 3 (Validate) connects to the restored server to query its content. If `dryRun=true`, no server is created so there is nothing to validate.
 
 **Decision:**
-Stage 3 runs only when `dryRun=false` (condition: `ne(parameters.dryRun, true)`).
+Stage 3 runs only when `dryRun=false` (condition: `eq(parameters.dryRun, false)`).
+
+> Note: the CNP pipeline previously used the string-comparison form `eq('${{ parameters.dryRun }}', 'false')`, which was functionally equivalent but inconsistent with the CPP pipeline and fragile under ADO boolean serialisation changes. Both pipelines now use `eq(parameters.dryRun, false)`.
 
 **Rationale:**
 - There is no meaningful validation to perform if no server was provisioned.

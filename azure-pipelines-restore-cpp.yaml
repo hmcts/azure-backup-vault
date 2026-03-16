@@ -19,6 +19,9 @@ parameters:
   - name: agentPool
     type: string
     default: MPD-ADO-AGENTS-01
+    values:
+      - MPD-ADO-AGENTS-01
+      - MDV-ADO-AGENTS-01
   - name: sourceServerName
     type: string
   - name: sourceResourceGroup
@@ -186,7 +189,7 @@ stages:
                 CONTAINER_NAME="${SERVER_SLUG}${TIMESTAMP}${BUILD_ID}"
 
                 # Validate container name before use
-                if [[ ${#CONTAINER_NAME} -ge 63 ]]; then
+                if [[ ${#CONTAINER_NAME} -gt 63 ]]; then
                   echo "WARNING: Container name exceeded 63 characters (${#CONTAINER_NAME} chars), truncating: ${CONTAINER_NAME}"
                   CONTAINER_NAME="${CONTAINER_NAME:0:63}"
                   echo "WARNING: Truncated container name: ${CONTAINER_NAME}"
@@ -292,6 +295,7 @@ stages:
                 if [[ -n "${EXISTING}" ]]; then
                   echo "Server ${RESTORED_NAME} already exists, skipping creation."
                 else
+                  echo "Creating Postgres server: ${RESTORED_NAME} (this typically takes 5-15 minutes)..."
                   # shellcheck disable=SC2086
                   az postgres flexible-server create \
                     --resource-group "${SOURCE_RESOURCE_GROUP}" \
@@ -306,7 +310,22 @@ stages:
                     --high-availability Disabled \
                     --admin-user "$(targetPostgresAdminUser)" \
                     --admin-password "$(targetPostgresAdminPassword)" \
-                    ${_SOURCE_SUB_FLAG}
+                    ${_SOURCE_SUB_FLAG} &
+                  CREATE_PID=$!
+                  ELAPSED=0
+                  while kill -0 "$CREATE_PID" 2>/dev/null; do
+                    sleep 30
+                    ELAPSED=$((ELAPSED + 30))
+                    # shellcheck disable=SC2086
+                    STATE=$(az postgres flexible-server show \
+                      --name "${RESTORED_NAME}" \
+                      --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                      ${_SOURCE_SUB_FLAG} \
+                      --query state -o tsv 2>/dev/null || echo "provisioning")
+                    echo "  [${ELAPSED}s] Server state: ${STATE}"
+                  done
+                  wait "$CREATE_PID"
+                  echo "Server creation completed."
                 fi
 
                 echo "Restored server FQDN: ${EXPECTED_FQDN}"

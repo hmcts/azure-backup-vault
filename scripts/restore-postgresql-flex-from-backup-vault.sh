@@ -548,6 +548,24 @@ EOF
 
   export PGPASSWORD="$TARGET_POSTGRES_ADMIN_PASSWORD"
 
+  # Wait for Postgres to accept TCP connections. The server may have been
+  # created moments ago and can take a short while after reporting 'Ready'
+  # before port 5432 is reachable. Also provides an early, clear error when
+  # the agent does not have network access to the private endpoint.
+  log "Waiting for Postgres to accept connections at ${TARGET_POSTGRES_HOST}:${postgres_port}..."
+  local pg_wait_elapsed=0
+  local pg_wait_timeout=300
+  until timeout 5 bash -c ">/dev/tcp/${TARGET_POSTGRES_HOST}/${postgres_port}" 2>/dev/null; do
+    if [[ "$pg_wait_elapsed" -ge "$pg_wait_timeout" ]]; then
+      fail "$(printf 'Timed out waiting for Postgres at %s:%s after %ss.\n       Check that:\n         1. The ADO agent has network access to the server'\''s private endpoint subnet\n         2. There is no NSG rule blocking port %s from the agent'\''s IP' \
+        "${TARGET_POSTGRES_HOST}" "${postgres_port}" "${pg_wait_timeout}" "${postgres_port}")"
+    fi
+    pg_wait_elapsed=$((pg_wait_elapsed + 15))
+    sleep 15
+    log "  [${pg_wait_elapsed}s] Still waiting for Postgres to accept connections..."
+  done
+  log "Postgres is accepting connections at ${TARGET_POSTGRES_HOST}:${postgres_port}"
+
   # Restore roles once up front, before the per-database loop
   if [[ -n "$roles_file" ]]; then
     local roles_restore_log="restore-output/roles-restore.log"
