@@ -81,7 +81,7 @@ module "restore_storage_account" {
     data.azurerm_subnet.cft_ptlsbox_aks_00.id,
     data.azurerm_subnet.cft_ptlsbox_aks_01.id,
     data.azurerm_subnet.ss_ptl_aks_00.id,
-    data.azurerm_subnet.ss_ptl_aks_01.id
+    data.azurerm_subnet.ss_ptl_aks_01.id,
     data.azurerm_subnet.ss_ptlsbox_aks_00.id,
     data.azurerm_subnet.ss_ptlsbox_aks_01.id
   ]
