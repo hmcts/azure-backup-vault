@@ -21,6 +21,20 @@ data "azurerm_subnet" "cft_ptl_aks_01" {
   resource_group_name  = "cft-ptl-network-rg"
 }
 
+data "azurerm_subnet" "cft_ptlsbox_aks_00" {
+  provider             = azurerm.cftptlsbox
+  name                 = "aks-00"
+  virtual_network_name = "cft-ptlsbox-vnet"
+  resource_group_name  = "cft-ptlsbox-network-rg"
+}
+
+data "azurerm_subnet" "cft_ptlsbox_aks_01" {
+  provider             = azurerm.cftptlsbox
+  name                 = "aks-01"
+  virtual_network_name = "cft-ptlsbox-vnet"
+  resource_group_name  = "cft-ptlsbox-network-rg"
+}
+
 data "azurerm_subnet" "ss_ptl_aks_00" {
   provider             = azurerm.sharedservicesptl
   name                 = "aks-00"
@@ -33,4 +47,18 @@ data "azurerm_subnet" "ss_ptl_aks_01" {
   name                 = "aks-01"
   virtual_network_name = "ss-ptl-vnet"
   resource_group_name  = "ss-ptl-network-rg"
+}
+
+data "azurerm_subnet" "ss_ptlsbox_aks_00" {
+  provider             = azurerm.sharedservicesptlsbox
+  name                 = "aks-00"
+  virtual_network_name = "ss-ptlsbox-vnet"
+  resource_group_name  = "ss-ptlsbox-network-rg"
+}
+
+data "azurerm_subnet" "ss_ptlsbox_aks_01" {
+  provider             = azurerm.sharedservicesptlsbox
+  name                 = "aks-01"
+  virtual_network_name = "ss-ptlsbox-vnet"
+  resource_group_name  = "ss-ptlsbox-network-rg"
 }
