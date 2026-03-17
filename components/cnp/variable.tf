@@ -18,8 +18,18 @@ variable "sharedservicesptl_subscription_id" {
   type        = string
 }
 
+variable "sharedservicesptlsbox_subscription_id" {
+  description = "The subscription ID for DTS-SHAREDSERVICESPTL-SBOX where managed identities are located"
+  type        = string
+}
+
 variable "cftptl_subscription_id" {
   description = "The subscription ID for DTS-CFTPTL-INTSVC"
+  type        = string
+}
+
+variable "cftptlsbox_subscription_id" {
+  description = "The subscription ID for DTS-CFTSBOX-INTSVC"
   type        = string
 }
 

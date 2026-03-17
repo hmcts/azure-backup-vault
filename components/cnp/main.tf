@@ -78,8 +78,12 @@ module "restore_storage_account" {
   sa_subnets = [
     data.azurerm_subnet.cft_ptl_aks_00.id,
     data.azurerm_subnet.cft_ptl_aks_01.id,
+    data.azurerm_subnet.cft_ptlsbox_aks_00.id,
+    data.azurerm_subnet.cft_ptlsbox_aks_01.id,
     data.azurerm_subnet.ss_ptl_aks_00.id,
-    data.azurerm_subnet.ss_ptl_aks_01.id
+    data.azurerm_subnet.ss_ptl_aks_01.id,
+    data.azurerm_subnet.ss_ptlsbox_aks_00.id,
+    data.azurerm_subnet.ss_ptlsbox_aks_01.id
   ]
 
   managed_identity_object_id = module.backup_vaults[try(each.value.backup_vault_key, "cnp-backup-vault")].backup_vault_principal_id

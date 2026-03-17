@@ -24,10 +24,26 @@ provider "azurerm" {
   resource_provider_registrations = "none"
 }
 
+# Provider for DTS-SHAREDSERVICESPTL-SBOX subscription
+provider "azurerm" {
+  features {}
+  alias                           = "sharedservicesptlsbox"
+  subscription_id                 = var.sharedservicesptlsbox_subscription_id
+  resource_provider_registrations = "none"
+}
+
 # Provider for DTS-CFTPTL subscription
 provider "azurerm" {
   features {}
   alias                           = "cftptl"
   subscription_id                 = var.cftptl_subscription_id
+  resource_provider_registrations = "none"
+}
+
+# Provider for DTS-CFTSBOX-INTSVC subscription
+provider "azurerm" {
+  features {}
+  alias                           = "cftptlsbox"
+  subscription_id                 = var.cftptlsbox_subscription_id
   resource_provider_registrations = "none"
 }
