@@ -608,7 +608,7 @@ EOF
     # (pg_availability, azure, pgaadauth, cron schema from pg_cron) that cannot
     # be restored from a backup dump — Azure owns and manages them directly.
     # User application data must always live in named databases, not in these.
-    if [[ "$db_name" == "azure_maintenance" || "$db_name" == "azure_sys" || "$db_name" == "postgres" ]]; then
+    if [[ "$db_name" == "azure_maintenance" || "$db_name" == "azure_sys" || "$db_name" == "postgres" || "$db_name" == "template1" ]]; then
       log "Skipping Azure-managed system database: ${db_name}"
       continue
     fi
