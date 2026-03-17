@@ -658,29 +658,42 @@ EOF
     set -e
 
     if [[ "$pg_restore_exit_code" -ne 0 ]]; then
-      # If pg_restore loaded data for any tables before failing, a psql fallback
-      # would cause a duplicate load. This is the dangerous case (especially for
-      # plain-SQL dumps with no unique constraints). Abort instead.
-      local data_loaded
-      data_loaded=$(grep -c "^pg_restore: restoring data for table" "$pg_restore_log" 2>/dev/null || true)
-      [[ -z "$data_loaded" ]] && data_loaded=0
+      # Check whether all errors are Azure extension allow-list rejections.
+      # Extensions such as pgstattuple, pg_visibility, etc. cannot be installed
+      # by azure_pg_admin users. These are diagnostic/maintenance extensions;
+      # application data still restores correctly without them. Treat allow-list
+      # errors as warnings and continue rather than aborting the restore.
+      local non_allowlist_errors
+      non_allowlist_errors=$(grep "^pg_restore: error:" "$pg_restore_log" 2>/dev/null \
+        | grep -v "allow-listed" || true)
 
-      if [[ "$data_loaded" -gt 0 ]]; then
-        fail "pg_restore loaded data for ${data_loaded} table(s) in ${db_name} before failing (exit ${pg_restore_exit_code}). Refusing psql fallback to prevent duplicate load. Review ${pg_restore_log}."
-      fi
-
-      # Only fall back when no data was loaded and the file is confirmed plain-text SQL.
-      # Detect plain-text by checking for the PostgreSQL custom-format magic bytes
-      # (PGDMP header). If absent, the file is plain-text SQL. Avoids requiring
-      # the 'file' utility which may not be present on the build agent.
-      local file_magic
-      file_magic=$(head -c 5 "$db_file" 2>/dev/null || true)
-      if [[ "$file_magic" != "PGDMP"* ]]; then
-        log "pg_restore failed with no data loaded and file is plain-text SQL. Falling back to psql."
-        db_restore_tool="psql"
-        psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=${db_name} sslmode=require" -f "$db_file"
+      if [[ -z "$non_allowlist_errors" ]]; then
+        warn "pg_restore completed with extension allow-list warnings for ${db_name} (exit ${pg_restore_exit_code}). All non-extension objects restored successfully. See ${pg_restore_log}."
       else
-        fail "pg_restore failed (exit ${pg_restore_exit_code}) for ${db_name} and file is not plain-text SQL. No fallback available. Review ${pg_restore_log}."
+        # If pg_restore processed data for any tables before failing, a psql
+        # fallback would cause a duplicate load. Verbose mode reports
+        # "processing data for table" — check for that pattern.
+        local data_loaded
+        data_loaded=$(grep -c "^pg_restore: processing data for table" "$pg_restore_log" 2>/dev/null || true)
+        [[ -z "$data_loaded" ]] && data_loaded=0
+
+        if [[ "$data_loaded" -gt 0 ]]; then
+          fail "pg_restore loaded data for ${data_loaded} table(s) in ${db_name} before failing (exit ${pg_restore_exit_code}). Refusing psql fallback to prevent duplicate load. Review ${pg_restore_log}."
+        fi
+
+        # Only fall back when no data was loaded and the file is confirmed plain-text SQL.
+        # Detect plain-text by checking for the PostgreSQL custom-format magic bytes
+        # (PGDMP header). If absent, the file is plain-text SQL. Avoids requiring
+        # the 'file' utility which may not be present on the build agent.
+        local file_magic
+        file_magic=$(head -c 5 "$db_file" 2>/dev/null || true)
+        if [[ "$file_magic" != "PGDMP"* ]]; then
+          log "pg_restore failed with no data loaded and file is plain-text SQL. Falling back to psql."
+          db_restore_tool="psql"
+          psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=${db_name} sslmode=require" -f "$db_file"
+        else
+          fail "pg_restore failed (exit ${pg_restore_exit_code}) for ${db_name} with non-extension errors. No fallback available. Review ${pg_restore_log}."
+        fi
       fi
     fi
 

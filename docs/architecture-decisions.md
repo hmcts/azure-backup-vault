@@ -135,10 +135,59 @@ No teardown stage is included in the pipeline.
 The `dryRun` parameter gates all mutating operations in Stages 1 and 2. Stage 3 (Validate) connects to the restored server to query its content. If `dryRun=true`, no server is created so there is nothing to validate.
 
 **Decision:**
-Stage 3 runs only when `dryRun=false` (condition: `eq(parameters.dryRun, false)`).
-
-> Note: the CNP pipeline previously used the string-comparison form `eq('${{ parameters.dryRun }}', 'false')`, which was functionally equivalent but inconsistent with the CPP pipeline and fragile under ADO boolean serialisation changes. Both pipelines now use `eq(parameters.dryRun, false)`.
+Stage 3 runs only when `dryRun=false`. Both pipelines use the compile-time expansion form `eq('${{ parameters.dryRun }}', 'false')` because `condition:` expressions are evaluated at runtime by the ADO agent, which has no access to the `parameters` context — that context only exists during YAML template expansion.
 
 **Rationale:**
 - There is no meaningful validation to perform if no server was provisioned.
 - Avoids a spurious connection failure polluting the pipeline run log.
+
+---
+
+## ADR-008: Azure-managed system databases skipped during restore
+
+**Date:** 2026-03-17
+**Status:** Accepted
+
+**Context:**
+Azure Backup Vault produces dump files for every database on the source PostgreSQL Flexible Server, including `postgres`, `azure_maintenance`, and `azure_sys`. These are Azure-internal system databases pre-created on every new Flexible Server instance.
+
+Attempting to restore them fails with errors such as:
+- `extension "pg_availability" is not available` — Azure-internal extension, not user-installable
+- `extension "azure" is not allow-listed` — restricted to Azure service internals
+- `extension "pgaadauth" is not allow-listed` — Azure AD auth extension, managed by Azure
+- `schema "cron" does not exist` — `pg_cron`'s schema is auto-created by Azure on server start when `shared_preload_libraries` includes `pg_cron`; it cannot be manually imported
+
+**Decision:**
+The restore script unconditionally skips `postgres`, `azure_maintenance`, and `azure_sys` database blobs. These databases are not restored from dump files.
+
+**Rationale:**
+- Azure recreates all three system databases (and their internal extensions) automatically on every new Flexible Server instance.
+- Restoration would fail regardless — the extensions are allow-listed only for Azure's own service account (`azuresu`), not for `azure_pg_admin` users.
+- User application data must always reside in named databases, not in these system databases.
+- `cron.job` entries (pg_cron scheduled jobs) from the source server are not restored. These are operational configuration, not application data, and must be recreated manually post-restore if required.
+
+---
+
+## ADR-009: `shared_preload_libraries` propagated from source to restored server
+
+**Date:** 2026-03-17
+**Status:** Accepted
+
+**Context:**
+Several PostgreSQL extensions require entries in `shared_preload_libraries` to activate, including `pg_stat_statements`, `pg_cron`, `pgaudit`, and `pg_buffercache`. This is a server-level parameter set via `az postgres flexible-server parameter set` and requires a server restart to take effect.
+
+A newly provisioned Flexible Server has a default `shared_preload_libraries` value which may differ from the source server. Without propagation, extensions dependent on preloading would be silently absent on the restored instance, causing application failures.
+
+The HMCTS estate uses at least the following `shared_preload_libraries` combinations across its servers:
+- `PG_BUFFERCACHE,PG_STAT_STATEMENTS,PG_CRON`
+- `pg_stat_statements,pg_cron,pgaudit`
+- `PG_BUFFERCACHE,PG_STAT_STATEMENTS,PG_CRON,PGAUDIT,PGCRYPTO`
+
+**Decision:**
+Stage 1 (`createPostgresServer`) reads `shared_preload_libraries` from the source server immediately after the restored server is created (or confirmed to exist on retry). If the value differs from the restored server's current setting, it is applied and the restored server is restarted. If it already matches (e.g. on a pipeline retry), no restart is performed.
+
+**Rationale:**
+- Ensures the restored server is operationally equivalent to the source with respect to extension availability.
+- The check-before-set pattern avoids unnecessary restarts on retries.
+- A server restart adds approximately 1–5 minutes but is mandatory for `shared_preload_libraries` changes to take effect — there is no way to defer this.
+- Extensions that do not require preloading (`pgcrypto`, `uuid-ossp`, etc.) are restored normally via `pg_restore` from the per-database dump files and are unaffected by this step.
