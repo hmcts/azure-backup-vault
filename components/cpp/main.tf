@@ -11,7 +11,7 @@ resource "azurerm_resource_group" "vaults" {
 }
 
 module "backup_vaults" {
-  for_each = local.backup_vaults
+  for_each = var.backup_vaults
 
   source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=main"
 
@@ -59,7 +59,7 @@ module "backup_vaults" {
 }
 
 module "restore_storage_account" {
-  for_each = local.storage_accounts
+  for_each = var.storage_accounts
 
   source = "git::https://github.com/hmcts/cpp-module-terraform-azurerm-storage-account.git?ref=feature/private-link-access"
 
@@ -72,7 +72,7 @@ module "restore_storage_account" {
   network_rules = {
     default_action             = try(each.value.default_action, "Deny")
     ip_rules                   = try(each.value.ip_rules, [])
-    virtual_network_subnet_ids = try(each.value.virtual_network_subnet_ids, [])
+    virtual_network_subnet_ids = try(local.storage_account_resolved_subnet_ids[each.key], [])
     bypass                     = try(each.value.bypass, ["AzureServices"])
   }
 
