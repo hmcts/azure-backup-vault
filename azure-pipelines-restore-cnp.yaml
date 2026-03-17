@@ -167,6 +167,7 @@ stages:
             displayName: Create restore storage container
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
+              visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
@@ -229,6 +230,7 @@ stages:
             condition: ne('${{ parameters.restoreMode }}', 'vault-only')
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
+              visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
@@ -410,6 +412,7 @@ stages:
             displayName: Execute backup-vault restore automation
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
+              visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
@@ -470,6 +473,7 @@ stages:
             displayName: Validate restored database content
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
+              visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
