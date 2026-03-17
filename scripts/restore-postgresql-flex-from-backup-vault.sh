@@ -603,7 +603,14 @@ EOF
   for database_blob_name in "${all_db_blobs[@]}"; do
     local db_name
     db_name=$(db_name_from_blob "$database_blob_name")
-
+    # azure_maintenance and azure_sys are Azure-managed internal databases.
+    # They contain Azure-internal extensions and tables (e.g. pg_availability,
+    # lsnmover) that are pre-created on every new Flexible Server instance and
+    # cannot be restored from a backup dump. Skip them unconditionally.
+    if [[ "$db_name" == "azure_maintenance" || "$db_name" == "azure_sys" ]]; then
+      log "Skipping Azure-internal database: ${db_name} (managed by Azure, not restorable)"
+      continue
+    fi
     log "============================================================"
     log " Restoring database: ${db_name}"
     log " Blob: ${database_blob_name}"
@@ -653,14 +660,20 @@ EOF
       # would cause a duplicate load. This is the dangerous case (especially for
       # plain-SQL dumps with no unique constraints). Abort instead.
       local data_loaded
-      data_loaded=$(grep -c "^pg_restore: restoring data for table" "$pg_restore_log" 2>/dev/null || echo "0")
+      data_loaded=$(grep -c "^pg_restore: restoring data for table" "$pg_restore_log" 2>/dev/null || true)
+      [[ -z "$data_loaded" ]] && data_loaded=0
 
       if [[ "$data_loaded" -gt 0 ]]; then
         fail "pg_restore loaded data for ${data_loaded} table(s) in ${db_name} before failing (exit ${pg_restore_exit_code}). Refusing psql fallback to prevent duplicate load. Review ${pg_restore_log}."
       fi
 
       # Only fall back when no data was loaded and the file is confirmed plain-text SQL.
-      if file "$db_file" | grep -q "ASCII text"; then
+      # Detect plain-text by checking for the PostgreSQL custom-format magic bytes
+      # (PGDMP header). If absent, the file is plain-text SQL. Avoids requiring
+      # the 'file' utility which may not be present on the build agent.
+      local file_magic
+      file_magic=$(head -c 5 "$db_file" 2>/dev/null || true)
+      if [[ "$file_magic" != "PGDMP"* ]]; then
         log "pg_restore failed with no data loaded and file is plain-text SQL. Falling back to psql."
         db_restore_tool="psql"
         psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=${db_name} sslmode=require" -f "$db_file"
