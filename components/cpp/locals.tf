@@ -27,7 +27,7 @@ locals {
   storage_account_resolved_subnet_ids = {
     for sa_key in keys(var.storage_accounts) : sa_key => [
       for k, ref in local.storage_account_subnet_refs :
-        data.azurerm_subnet.storage_account_subnets[k].id
+      data.azurerm_subnet.storage_account_subnets[k].id
       if ref.storage_account_key == sa_key
     ]
   }

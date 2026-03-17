@@ -46,7 +46,7 @@ storage_accounts = {
     default_action                = "Deny"
     bypass                        = ["AzureServices"]
     backup_vault_key              = "cpp-backup-vault"
-    virtual_network_subnets       = [
+    virtual_network_subnets = [
       {
         name                 = "SN-MPD-SBZ-ADO-CISLAVE-01"
         virtual_network_name = "VN-MPD-INT-01"

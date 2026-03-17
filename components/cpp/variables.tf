@@ -61,14 +61,14 @@ variable "storage_accounts" {
     public_network_access_enabled = optional(bool, true)
     default_action                = optional(string, "Deny")
     ip_rules                      = optional(list(string), [])
-    virtual_network_subnets       = optional(list(object({
+    virtual_network_subnets = optional(list(object({
       name                 = string
       virtual_network_name = string
       resource_group_name  = string
     })), [])
-    bypass                        = optional(list(string), ["AzureServices"])
-    backup_vault_key              = optional(string, "cpp-backup-vault")
-    endpoint_tenant_id            = optional(string)
+    bypass             = optional(list(string), ["AzureServices"])
+    backup_vault_key   = optional(string, "cpp-backup-vault")
+    endpoint_tenant_id = optional(string)
   }))
 }
 
