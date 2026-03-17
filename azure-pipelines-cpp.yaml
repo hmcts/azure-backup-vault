@@ -17,6 +17,9 @@ parameters:
   - name: tfversion
     default: 1.14.4
   - name: agentPool
+    values:
+      - MPD-ADO-AGENTS-01
+      - MDV-ADO-AGENTS-01
     default: "MPD-ADO-AGENTS-01"
   - name: action
     values:
