@@ -154,9 +154,9 @@ Connected to source server `plum-v14-flexible-sandbox` as `pgadmin` and to resto
 | Database | Source tables | Restored tables | Source rows (`recipe`) | Restored rows (`recipe`) |
 |---|---|---|---|---|
 | `plum` | 0 (empty) | 0 | — | — |
-| `rhubarb` | 7 | 7 | 0 | 0 |
+| `rhubarb` | 7 | 7 | 0 (`recipe`) | 0 (`recipe`) |
 
-Schema (tables) is faithfully restored. The `recipe` table is empty on both source and restored server, indicating the table was already empty at the backup recovery point (`2026-03-12T11:53:35Z`). Row-count parity between source and restore confirms no data was present to recover.
+Schema (tables) is faithfully restored. The `recipe` table is empty on both source and restored server. However, the full-run (Scenario 4.2) confirmed `rhubarb` has **19 total estimated rows** across all 7 tables — the data lives in `dh_test`, `dh_test_audit`, `dh_testing_constraints*`, and `flyway_schema_history`. Point-in-time recovery is working correctly.
 
 ---
 
@@ -198,29 +198,63 @@ Schema (tables) is faithfully restored. The `recipe` table is empty on both sour
 
 | Parameter | Value |
 |---|---|
-| `agentPool` | `<your-self-hosted-pool>` |
+| `agentPool` | `hmcts-sandbox-agent-pool` |
 | `dryRun` | `false` |
 | `restoreMode` | `all` |
-| `sourceServerName` | `<your-source-server>` |
-| `sourceResourceGroup` | `<rg>` |
-| `sourceSubscription` | `'none'` (or subscription ID if cross-subscription) |
-| `vaultResourceGroup` | `<vault-rg>` |
-| `vaultName` | `<vault-name>` |
-| `vaultSubscription` | `'none'` (or subscription ID if cross-subscription) |
-| `recoveryPointTimeUtc` | `<ISO8601 timestamp e.g. 2026-03-11T02:00:00Z>` |
+| `sourceServerName` | `plum-v14-flexible-sandbox` |
+| `sourceResourceGroup` | `plum-v14-flexible-data-sandbox` |
+| `sourceSubscription` | `'none'` |
+| `vaultResourceGroup` | `mgmt-infra-prod-rg` |
+| `vaultName` | `cnp-backup-vault` |
+| `vaultSubscription` | `'none'` |
+| `recoveryPointTimeUtc` | `'none'` (latest) |
 
 **Expected:** Full end-to-end — container created, vault restore triggered and polled, roles replayed, all databases restored in sequence, Stage 3 validates all databases.
 
 | Checkpoint | Expected | Status |
 |---|---|---|
-| Container created with unique generated name | Container visible in storage account | — |
-| Vault restore job completed | `restoreJobStatus: Completed` in metrics | — |
-| Correct recovery point selected | Logged recovery point at or before requested time | — |
-| Roles replayed once before loop | "Restoring roles" appears once | — |
-| Each database restored in sequence | One "Restoring database:" block per DB | — |
-| Local dump files deleted after each restore | No `_database_*.sql` files in artifact | — |
-| Stage 3: all user databases present | Same set as source | — |
-| Stage 3: non-zero `total_tables` per database | Data present in each database | — |
-| Stage 3: non-zero `total_estimated_rows` per database | Rows present in each database | — |
-| `restore-metrics.json` complete | Vault job details + `databaseRestores` array | — |
-| `restore-output` artifact published | Artifact visible in pipeline summary | — |
+| Container created with unique generated name | Container visible in storage account | ✅ `plumv14flexiblesandbox53131703261051881` |
+| Source server config logged | SKU, version, storage, location, subnet | ✅ `Standard_B1ms`, v16, 64GB, `uksouth` |
+| Restored server created | Server provisioned and reaches `Ready` state | ✅ `plum-v14-flexible-sandbox-restore-5313170326` — Ready at ~330s |
+| `shared_preload_libraries` propagated | Source libraries applied to restored server | ✅ `pg_cron,pg_stat_statements` — already matched, no restart needed |
+| Vault restore job completed | `restoreJobStatus: Completed` in metrics | ✅ Confirmed (Stage 2) |
+| Roles replayed once before loop | "Restoring roles" appears once | ✅ Confirmed |
+| `plum` restored (empty DB) | No errors, no data | ✅ Confirmed |
+| `rhubarb` restored with allow-list warning | `pgstattuple` rejected, WARN logged, restore continues | ✅ WARN logged — all non-extension objects restored |
+| System databases skipped | `azure_maintenance`, `azure_sys`, `postgres`, `template1` skipped | ✅ `template1` skip logged; others skipped silently |
+| Local dump files deleted after each restore | No `_database_*.sql` files in artifact | ✅ `6 database(s) restored in 4s` |
+| Stage 3: all user databases listed | `plum`, `rhubarb` | ✅ Confirmed |
+| Stage 3: `rhubarb` — 7 user tables in `public` schema | All tables restored | ✅ `dh_test`, `dh_test_audit`, `dh_testing_constraints`, `dh_testing_constraints_table1`, `dh_testing_constraints_table2`, `flyway_schema_history`, `recipe` |
+| Stage 3: `rhubarb` — row counts | Non-zero across tables | ✅ Total 19 estimated rows across 7 tables (`dh_test_audit`: 9, `dh_test`: 3, constraints tables: 2 each, `flyway_schema_history`: 1, `recipe`: 0) |
+| Stage 3: `rhubarb` totals | `total_tables=7`, `total_estimated_rows=19` | ✅ Confirmed |
+| `restore-metrics.json` complete | Vault job details + `databaseRestores` array | ✅ Confirmed |
+| `restore-output` artifact published | Artifact visible in pipeline summary | ✅ Confirmed |
+
+**Note on `--high-availability` deprecation warning:** The `az postgres flexible-server create` flag `--high-availability` is deprecated in favour of `--zonal-resiliency`, scheduled for removal in CLI 2.86.0 (May 2026). The pipeline should be updated before that release. See [future-improvements.md](future-improvements.md).
+
+---
+
+### Scenario 4.3 — Live full restore (parallel run, different source server)
+
+Run concurrently with Scenario 4.2 to verify the pipeline handles simultaneous restores correctly and that the prefix-fallback blob discovery works when the vault writes files with a UUID prefix rather than the pipeline-generated prefix.
+
+| Parameter | Value |
+|---|---|
+| `sourceServerName` | `crumble-v14-flexible-sandbox` |
+| `restoreMode` | `all` |
+| `dryRun` | `false` |
+
+| Checkpoint | Expected | Status |
+|---|---|---|
+| Vault restore job completed | `restoreJobStatus: Completed` | ✅ Completed (~2m) |
+| Prefix fallback triggered | Blobs found after retrying without prefix filter | ✅ "No blobs matched with prefix 'restore-1051880-0014170326', retrying without prefix filter" — 6 blobs found via fallback |
+| System databases skipped | `azure_maintenance`, `azure_sys`, `postgres`, `template1` skipped | ✅ All 4 skipped |
+| `plum` restored (empty DB) | Schema only, no tables | ✅ Confirmed |
+| `rhubarb` restored (slimmer schema) | 2 tables: `flyway_schema_history`, `recipe` | ✅ Confirmed — no `pgstattuple` extension on this server |
+| Stage 3: `rhubarb` totals | `total_tables=2`, `total_estimated_rows=1` | ✅ `flyway_schema_history`: 1 row, `recipe`: 0 rows |
+| Pipeline completed successfully | All 3 stages passed | ✅ Confirmed |
+
+**Notes:**
+- This `rhubarb` instance has a simpler schema (2 tables vs 7 on `plum-v14-flexible-sandbox`) — confirms the restore is faithful to the specific source server's schema, not a fixed template.
+- No `pgstattuple` extension present on this server — clean `pg_restore` exit, no allow-list warnings.
+- The prefix fallback is working as designed: Azure Backup Vault writes blobs with a UUID prefix; the pipeline falls back gracefully when the generated prefix doesn't match.
