@@ -329,6 +329,53 @@ stages:
                   echo "Server creation completed."
                 fi
 
+                # Propagate shared_preload_libraries from source server.
+                # pg_cron (and any other preload libraries) require this parameter
+                # to be set before the cron schema and scheduler are available.
+                # Changing shared_preload_libraries requires a server restart.
+                # shellcheck disable=SC2086
+                SOURCE_PRELOAD=$(az postgres flexible-server parameter show \
+                  --server-name "${SOURCE_SERVER_NAME}" \
+                  --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                  --name shared_preload_libraries \
+                  ${_SOURCE_SUB_FLAG} \
+                  --query value -o tsv 2>/dev/null || echo "")
+
+                if [[ -n "${SOURCE_PRELOAD}" ]]; then
+                  echo "Source server shared_preload_libraries: ${SOURCE_PRELOAD}"
+                  # shellcheck disable=SC2086
+                  CURRENT_PRELOAD=$(az postgres flexible-server parameter show \
+                    --server-name "${RESTORED_NAME}" \
+                    --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                    --name shared_preload_libraries \
+                    ${_SOURCE_SUB_FLAG} \
+                    --query value -o tsv 2>/dev/null || echo "")
+
+                  if [[ "${SOURCE_PRELOAD}" != "${CURRENT_PRELOAD}" ]]; then
+                    echo "Setting shared_preload_libraries on restored server: ${SOURCE_PRELOAD}"
+                    # shellcheck disable=SC2086
+                    az postgres flexible-server parameter set \
+                      --server-name "${RESTORED_NAME}" \
+                      --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                      --name shared_preload_libraries \
+                      --value "${SOURCE_PRELOAD}" \
+                      ${_SOURCE_SUB_FLAG} \
+                      --output none
+                    echo "Restarting restored server to apply shared_preload_libraries..."
+                    # shellcheck disable=SC2086
+                    az postgres flexible-server restart \
+                      --name "${RESTORED_NAME}" \
+                      --resource-group "${SOURCE_RESOURCE_GROUP}" \
+                      ${_SOURCE_SUB_FLAG} \
+                      --output none
+                    echo "Restart complete."
+                  else
+                    echo "shared_preload_libraries already matches source — no restart needed."
+                  fi
+                else
+                  echo "Source server has no shared_preload_libraries set — skipping propagation."
+                fi
+
                 echo "Restored server FQDN: ${EXPECTED_FQDN}"
                 echo "##vso[task.setvariable variable=restoredServerFqdn;isOutput=true]${EXPECTED_FQDN}"
             env:
