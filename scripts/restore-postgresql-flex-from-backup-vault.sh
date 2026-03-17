@@ -603,12 +603,13 @@ EOF
   for database_blob_name in "${all_db_blobs[@]}"; do
     local db_name
     db_name=$(db_name_from_blob "$database_blob_name")
-    # azure_maintenance and azure_sys are Azure-managed internal databases.
-    # They contain Azure-internal extensions and tables (e.g. pg_availability,
-    # lsnmover) that are pre-created on every new Flexible Server instance and
-    # cannot be restored from a backup dump. Skip them unconditionally.
-    if [[ "$db_name" == "azure_maintenance" || "$db_name" == "azure_sys" ]]; then
-      log "Skipping Azure-internal database: ${db_name} (managed by Azure, not restorable)"
+    # Skip Azure-managed system databases. These are pre-created on every new
+    # Flexible Server instance and contain Azure-internal extensions and objects
+    # (pg_availability, azure, pgaadauth, cron schema from pg_cron) that cannot
+    # be restored from a backup dump — Azure owns and manages them directly.
+    # User application data must always live in named databases, not in these.
+    if [[ "$db_name" == "azure_maintenance" || "$db_name" == "azure_sys" || "$db_name" == "postgres" ]]; then
+      log "Skipping Azure-managed system database: ${db_name}"
       continue
     fi
     log "============================================================"
@@ -650,6 +651,7 @@ EOF
       -U "$TARGET_POSTGRES_ADMIN_USER" \
       -d "$db_name" \
       --no-owner \
+      --no-privileges \
       -v \
       "$db_file" 2>&1 | tee "$pg_restore_log"
     local pg_restore_exit_code=${PIPESTATUS[0]}
