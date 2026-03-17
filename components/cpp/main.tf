@@ -83,13 +83,19 @@ module "restore_storage_account" {
     }
   }
 
-  role_assignments = [
-    {
-      role_name = "Storage Blob Data Contributor"
-      object_id = module.backup_vaults[try(each.value.backup_vault_key, "cpp-backup-vault")].backup_vault_principal_id
-    }
-  ]
-
   environment = var.environment
   tags        = merge(var.tags, local.common_tags)
+}
+
+# Grant each backup vault's managed identity Storage Blob Data Contributor on its
+# associated restore storage account. The role assignment is managed here rather
+# than via the storage account module's role_assignments input because that
+# module keys its for_each on object_id, which is only known after apply.
+# Using a static key here ("<sa_key>-blob-contributor") avoids that limitation.
+resource "azurerm_role_assignment" "backup_vault_storage_blob_contributor" {
+  for_each = var.storage_accounts
+
+  scope                = module.restore_storage_account[each.key].storage_account_id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = module.backup_vaults[try(each.value.backup_vault_key, "cpp-backup-vault")].backup_vault_principal_id
 }
