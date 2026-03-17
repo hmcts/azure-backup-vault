@@ -68,7 +68,7 @@ The CPP production environment contains the CPP backup vault configuration:
 The CNP production environment contains fully hardened backup vault configurations:
 
 - **Immutability**: Unlocked for initial deployment, can be locked after validation
-- **Cross-Region Restore**: Enabled for business continuity  
+- **Cross-Region Restore**: Enabled for business continuity
 - **Backup Policies**: All PostgreSQL policies enabled (CRIT4/5 and test)
 - **Extended Retention**: Enabled for MOJ compliance (P56D/P2M/P1Y)
 - **Redundancy**: GeoRedundant for cross-region disaster recovery

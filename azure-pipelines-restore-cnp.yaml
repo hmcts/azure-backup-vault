@@ -204,7 +204,7 @@ stages:
                 if [[ "${DRY_RUN,,}" == "true" ]]; then
                   echo "[DRY RUN] Would create container: ${CONTAINER_NAME}"
                   echo "[DRY RUN]   in storage account:  ${RESTORE_STORAGE_ACCOUNT}"
-                  echo "##vso[task.setvariable variable=restoreContainerName;isOutput=true]${CONTAINER_NAME}dryrun"
+                  echo "##vso[task.setvariable variable=restoreContainerName;isOutput=true]${CONTAINER_NAME}"
                   exit 0
                 fi
 
@@ -282,7 +282,7 @@ stages:
                   echo "  --version ${VERSION} --storage-size ${STORAGE_GB} \\"
                   echo "  --subnet ${SUBNET_ID} \\"
                   echo "  --private-dns-zone ${DNS_ZONE_ID} \\"
-                  echo "  --high-availability Disabled"
+                  echo "  --high-availability Disabled \\"
                   [[ -n "${_SOURCE_SUB_FLAG}" ]] && echo "  ${_SOURCE_SUB_FLAG}"
                   echo "##vso[task.setvariable variable=restoredServerFqdn;isOutput=true]${EXPECTED_FQDN}"
                   exit 0

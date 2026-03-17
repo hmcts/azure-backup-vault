@@ -661,7 +661,7 @@ EOF
       # Check whether all errors are Azure extension allow-list rejections.
       # Extensions such as pgstattuple, pg_visibility, etc. cannot be installed
       # by azure_pg_admin users. These are diagnostic/maintenance extensions;
-      # application data still restores correctly without them. Treat allow-list
+      # application data still restores correctly ar. Treat allow-list
       # errors as warnings and continue rather than aborting the restore.
       local non_allowlist_errors
       non_allowlist_errors=$(grep "^pg_restore: error:" "$pg_restore_log" 2>/dev/null \

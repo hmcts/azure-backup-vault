@@ -149,14 +149,14 @@ Run in order. Verify each checkpoint before proceeding to the next scenario.
 
 **Manual data integrity verification (post-restore):**
 
-Connected to source server `plum-v14-flexible-sandbox` as `pgadmin` and compared with the restored server:
+Connected to source server `plum-v14-flexible-sandbox` as `pgadmin` and to restored server `plum-v14-flexible-sandbox-restore-4411170326` as `hmctsAdmin`, and compared:
 
 | Database | Source tables | Restored tables | Source rows (`recipe`) | Restored rows (`recipe`) |
 |---|---|---|---|---|
 | `plum` | 0 (empty) | 0 | — | — |
-| `rhubarb` | 7 | 7 | 0 (deleted since backup) | 19 |
+| `rhubarb` | 7 | 7 | 0 | 0 |
 
-The `recipe` row count divergence confirms **point-in-time recovery is working correctly**: data was deleted from the source after the backup was taken. The restore faithfully captures the server state at the recovery point (`2026-03-12T11:53:35Z`), not the current source state. This is the intended behaviour.
+Schema (tables) is faithfully restored. The `recipe` table is empty on both source and restored server, indicating the table was already empty at the backup recovery point (`2026-03-12T11:53:35Z`). Row-count parity between source and restore confirms no data was present to recover.
 
 ---
 
@@ -169,22 +169,28 @@ The `recipe` row count divergence confirms **point-in-time recovery is working c
 | `agentPool` | `<your-self-hosted-pool>` |
 | `dryRun` | `true` |
 | `restoreMode` | `all` |
-| `sourceServerName` | `<your-source-server>` |
-| `sourceResourceGroup` | `<rg>` |
-| `sourceSubscription` | `'none'` (or subscription ID if cross-subscription) |
-| `vaultResourceGroup` | `<vault-rg>` |
-| `vaultName` | `<vault-name>` |
-| `vaultSubscription` | `'none'` (or subscription ID if cross-subscription) |
+| `sourceServerName` | `plum-v14-flexible-sandbox` |
+| `sourceResourceGroup` | `plum-v14-flexible-data-sandbox` |
+| `sourceSubscription` | `'none'` |
+| `vaultResourceGroup` | `mgmt-infra-prod-rg` |
+| `vaultName` | `cnp-backup-vault` |
+| `vaultSubscription` | `'none'` |
 
 **Expected:** Full discovery preview — vault instances, recovery points, blob list (empty in dry run, expected). Confirms all parameters wired correctly before committing.
 
 | Checkpoint | Expected | Status |
 |---|---|---|
-| Vault instance resolved | Instance name logged | — |
-| Recovery point resolved | Recovery point ID logged | — |
-| Dry run preview commands printed | `[DRY RUN PREVIEW]` lines in log | — |
-| No container created | Storage account unchanged | — |
-| No server created | No server provisioning in log | — |
+| Source server config logged | SKU, version, storage, location, subnet logged | ✅ `Standard_B1ms`, v16, 64GB, `uksouth` |
+| Restored server name derived correctly | `<source>-restore-<ddmmyy>` | ✅ `plum-v14-flexible-sandbox-restore-3412170326` |
+| Server create preview printed | `[DRY RUN] Would create Postgres server:` in log | ✅ Confirmed with full `az postgres flexible-server create` preview |
+| Container name preview printed | `[DRY RUN] Would create container:` in log | ✅ `plumv14flexiblesandbox34121703261051769` in `cnpvaultrestorationsprod` |
+| Vault instance resolved | Instance name logged | ✅ `plum-v14-flexible-sandbox-backup-instance` |
+| Recovery point resolved | Recovery point ID logged | ✅ `fc0ae7fc1e944a8d8fa3e6ac612cd62f @ 2026-03-12T11:53:35Z` |
+| Blob listing gracefully skipped | Container-not-found handled as expected in dry run | ✅ Logged as info, not error |
+| Dry run preview commands printed | `[DRY RUN PREVIEW]` lines for restore trigger, poll, and DB restore | ✅ Confirmed |
+| No container created | Storage account unchanged | ✅ Dry run — no mutations executed |
+| No server created | No server provisioning in log | ✅ Dry run — no mutations executed |
+| Stage 3 (Validate) skipped | Not executed in dry run | ✅ Skipped |
 
 ---
 

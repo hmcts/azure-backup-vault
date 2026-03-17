@@ -79,8 +79,8 @@ The restored server is created in the same resource group as the source server (
 
 ## ADR-005: restoreMode parameter controls restore scope
 
-**Date:** 2026-03-11  
-**Updated:** 2026-03-12  
+**Date:** 2026-03-11
+**Updated:** 2026-03-12
 **Status:** Accepted
 
 **Context:**
