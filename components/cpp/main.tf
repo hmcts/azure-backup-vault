@@ -11,7 +11,7 @@ resource "azurerm_resource_group" "vaults" {
 }
 
 module "backup_vaults" {
-  for_each = local.backup_vaults
+  for_each = var.backup_vaults
 
   source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=main"
 
@@ -59,7 +59,7 @@ module "backup_vaults" {
 }
 
 module "restore_storage_account" {
-  for_each = local.storage_accounts
+  for_each = var.storage_accounts
 
   source = "git::https://github.com/hmcts/cpp-module-terraform-azurerm-storage-account.git?ref=feature/private-link-access"
 
@@ -72,7 +72,7 @@ module "restore_storage_account" {
   network_rules = {
     default_action             = try(each.value.default_action, "Deny")
     ip_rules                   = try(each.value.ip_rules, [])
-    virtual_network_subnet_ids = try(each.value.virtual_network_subnet_ids, [])
+    virtual_network_subnet_ids = try(local.storage_account_resolved_subnet_ids[each.key], [])
     bypass                     = try(each.value.bypass, ["AzureServices"])
   }
 
@@ -83,13 +83,19 @@ module "restore_storage_account" {
     }
   }
 
-  role_assignments = [
-    {
-      role_name = "Storage Blob Data Contributor"
-      object_id = module.backup_vaults[try(each.value.backup_vault_key, "cpp-backup-vault")].backup_vault_principal_id
-    }
-  ]
-
   environment = var.environment
   tags        = merge(var.tags, local.common_tags)
+}
+
+# Grant each backup vault's managed identity Storage Blob Data Contributor on its
+# associated restore storage account. The role assignment is managed here rather
+# than via the storage account module's role_assignments input because that
+# module keys its for_each on object_id, which is only known after apply.
+# Using a static key here ("<sa_key>-blob-contributor") avoids that limitation.
+resource "azurerm_role_assignment" "backup_vault_storage_blob_contributor" {
+  for_each = var.storage_accounts
+
+  scope                = module.restore_storage_account[each.key].storage_account_id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = module.backup_vaults[try(each.value.backup_vault_key, "cpp-backup-vault")].backup_vault_principal_id
 }

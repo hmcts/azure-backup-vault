@@ -17,6 +17,9 @@ parameters:
   - name: tfversion
     default: 1.14.4
   - name: agentPool
+    values:
+      - MPD-ADO-AGENTS-01
+      - MDV-ADO-AGENTS-01
     default: "MPD-ADO-AGENTS-01"
   - name: action
     values:
@@ -30,9 +33,15 @@ parameters:
       - sbox
     default: prod
   - name: platform
+    values:
+      - live
+      - nonlive
     default: "live"
   - name: environment
-    default: "cpp-prod"
+    values:
+      - cpp-live
+      - cpp-nonlive
+    default: "cpp-live"
   - name: targetResources
     default: null
 
