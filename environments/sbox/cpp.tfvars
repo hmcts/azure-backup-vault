@@ -13,10 +13,29 @@ backup_vaults = {
     soft_delete                  = "Off"
     retention_duration_in_days   = 14
 
-    enable_postgresql_crit4_5_policy  = true
-    enable_postgresql_test_policy     = true
-    crit4_5_enable_extended_retention = false
+    enable_postgresql_crit4_5_policy   = true
+    enable_postgresql_test_policy      = false
+    crit4_5_enable_extended_retention  = true
+    crit4_5_weekly_retention_duration  = "P56D"
+    crit4_5_monthly_retention_duration = "P2M"
+    crit4_5_yearly_retention_duration  = "P1Y"
+    # Reader role assignment for resource group containing Postgresql instances that need to be protected.
+    role_assignments = {
+    "reader-RG-NFT-CCM-01" = {
+      scope                = "/subscriptions/e6b5053b-4c38-4475-a835-a025aeb3d8c7/resourceGroups/RG-NFT-CCM-01"
+      role_definition_name = "Reader"
+    }
+    "reader-RG-SIT-CCM-01" = {
+      scope                = "/subscriptions/e6b5053b-4c38-4475-a835-a025aeb3d8c7/resourceGroups/RG-SIT-CCM-01"
+      role_definition_name = "Reader"
+    }
+    "reader-RG-DEV-CCM-01" = {
+      scope                = "/subscriptions/e6b5053b-4c38-4475-a835-a025aeb3d8c7/resourceGroups/RG-DEV-CCM-01"
+      role_definition_name = "Reader"
+    }
   }
+  }
+
 }
 
 ado_agent_vnet = "VN-MDV-SBZ-01"
