@@ -43,7 +43,7 @@ storage_accounts = {
 
 namespace   = "cpp"
 application = "backup"
-environment = "sandbox"
+environment = "mdv"
 owner       = "platops"
 costcode    = "10038"
 type        = "backup"
