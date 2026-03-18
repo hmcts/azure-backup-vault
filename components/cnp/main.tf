@@ -56,7 +56,7 @@ resource "azurerm_role_assignment" "jenkins_ptl_mi_contributor_cnp_vault" {
 module "restore_storage_account" {
   for_each = local.storage_accounts
 
-  source = "git::https://github.com/hmcts/cnp-module-storage-account.git?ref=feature/private-link-access"
+  source = "git::https://github.com/hmcts/cnp-module-storage-account.git?ref=4.x"
 
   storage_account_name = substr(replace(lower("${each.key}${var.env}"), "/[^a-z0-9]/", ""), 0, 24)
   location             = var.location
