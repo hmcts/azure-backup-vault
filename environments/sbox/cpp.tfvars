@@ -21,19 +21,19 @@ backup_vaults = {
     crit4_5_yearly_retention_duration  = "P1Y"
     # Reader role assignment for resource group containing Postgresql instances that need to be protected.
     role_assignments = {
-    "reader-RG-NFT-CCM-01" = {
-      scope                = "/subscriptions/e6b5053b-4c38-4475-a835-a025aeb3d8c7/resourceGroups/RG-NFT-CCM-01"
-      role_definition_name = "Reader"
+      "reader-RG-NFT-CCM-01" = {
+        scope                = "/subscriptions/e6b5053b-4c38-4475-a835-a025aeb3d8c7/resourceGroups/RG-NFT-CCM-01"
+        role_definition_name = "Reader"
+      }
+      "reader-RG-SIT-CCM-01" = {
+        scope                = "/subscriptions/e6b5053b-4c38-4475-a835-a025aeb3d8c7/resourceGroups/RG-SIT-CCM-01"
+        role_definition_name = "Reader"
+      }
+      "reader-RG-DEV-CCM-01" = {
+        scope                = "/subscriptions/e6b5053b-4c38-4475-a835-a025aeb3d8c7/resourceGroups/RG-DEV-CCM-01"
+        role_definition_name = "Reader"
+      }
     }
-    "reader-RG-SIT-CCM-01" = {
-      scope                = "/subscriptions/e6b5053b-4c38-4475-a835-a025aeb3d8c7/resourceGroups/RG-SIT-CCM-01"
-      role_definition_name = "Reader"
-    }
-    "reader-RG-DEV-CCM-01" = {
-      scope                = "/subscriptions/e6b5053b-4c38-4475-a835-a025aeb3d8c7/resourceGroups/RG-DEV-CCM-01"
-      role_definition_name = "Reader"
-    }
-  }
   }
 
 }
