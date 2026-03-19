@@ -82,6 +82,12 @@ variable "tags" {
   default     = {}
 }
 
+variable "ado_service_connection_object_id" {
+  type        = string
+  description = "The object Id of the service connection that will be running the pipeline"
+  default     = null
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # OPTIONAL VARIABLES - Common HMCTS Tags
 # ---------------------------------------------------------------------------------------------------------------------
