@@ -38,6 +38,8 @@ backup_vaults = {
   }
 }
 
+ado_service_connection_object_id = "9fd14845-2c97-4710-89f1-808ca78d373c"
+
 storage_accounts = {
   "cppvaultrestore" = {
     account_kind                  = "StorageV2"
@@ -69,4 +71,3 @@ tags = {
   "criticality"  = "High"
   "expiresAfter" = "3000-01-01"
 }
-

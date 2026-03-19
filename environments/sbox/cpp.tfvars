@@ -38,8 +38,6 @@ backup_vaults = {
 
 }
 
-ado_agent_vnet                   = "VN-MDV-SBZ-01"
-ado_agent_rg                     = "RG-MDV-SBZ-01"
 ado_service_connection_object_id = "1a0172bd-5e9d-4017-aab3-0756c7dbd7cf"
 
 storage_accounts = {
