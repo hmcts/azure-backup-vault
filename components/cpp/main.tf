@@ -100,7 +100,7 @@ resource "azurerm_role_assignment" "backup_vault_storage_blob_contributor" {
   principal_id         = module.backup_vaults[try(each.value.backup_vault_key, "cpp-backup-vault")].backup_vault_principal_id
 }
 
-resource "azurerm_role_assignment" "ado_service_connection" {
+resource "azurerm_role_assignment" "ado_service_connection_sa" {
   for_each = var.ado_service_connection_object_id != null ? var.storage_accounts : {}
 
   scope                = module.restore_storage_account[each.key].storage_account_id
@@ -108,7 +108,7 @@ resource "azurerm_role_assignment" "ado_service_connection" {
   principal_id         = var.ado_service_connection_object_id
 }
 
-resource "azurerm_role_assignment" "ado_service_connection" {
+resource "azurerm_role_assignment" "ado_service_connection_bv" {
   for_each = var.ado_service_connection_object_id != null ? var.backup_vaults : {}
 
   scope                = module.backup_vaults[each.key].backup_vault_id
