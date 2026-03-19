@@ -3,16 +3,13 @@ name: Azure Backup Vault Restore - CPP
 trigger: none
 pr: none
 
-variables:
-  - template: azure-pipeline-variables/live.yml
-  - group: cpp-backup-vault-restore-secrets
-  # Pre-provisioned by Terraform - the only permitted restore target for CPP.
-  # Must match the storage account deployed by the azure-backup-vault Terraform module.
-  # See docs/architecture-decisions.md ADR-002.
-  - name: cppRestoreStorageAccount
-    value: 'sacppvaultrestoreprd'
-
 parameters:
+  - name: environment
+    type: string
+    default: live
+    values:
+      - live
+      - nonlive
   - name: serviceConnection
     type: string
     default: ado_live_workload_identity
@@ -22,6 +19,11 @@ parameters:
     values:
       - MPD-ADO-AGENTS-01
       - MDV-ADO-AGENTS-01
+  # Pre-provisioned by Terraform - the only permitted restore target for CPP.
+  # Must match the storage account deployed by the azure-backup-vault Terraform module.
+  # See docs/architecture-decisions.md ADR-002.
+  - name: restoreStorageAccount
+    type: string
   - name: sourceServerName
     type: string
   - name: sourceResourceGroup
@@ -120,6 +122,13 @@ parameters:
     type: string
     default: '5432'
 
+variables:
+  - ${{ if eq(parameters.environment, 'live') }}:
+    - template: azure-pipeline-variables/live.yml
+  - ${{ else }}:
+    - template: azure-pipeline-variables/nonlive.yml
+  - group: cpp-backup-vault-restore-secrets
+
 stages:
   # ---------------------------------------------------------------------------
   # Stage 1: Provision
@@ -157,7 +166,7 @@ stages:
               echo "restoreRoles:                     ${{ parameters.restoreRoles }}"
               echo "restoreTimeoutMinutes:            ${{ parameters.restoreTimeoutMinutes }}"
               echo "pollSeconds:                      ${{ parameters.pollSeconds }}"
-              echo "restoreStorageAccount:            $(cppRestoreStorageAccount)"
+              echo "restoreStorageAccount:            ${{ parameters.restoreStorageAccount }}"
               echo "============================================================"
             displayName: Print pipeline inputs
 
@@ -166,6 +175,7 @@ stages:
             displayName: Create restore storage container
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
+              visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
@@ -202,7 +212,7 @@ stages:
                 if [[ "${DRY_RUN,,}" == "true" ]]; then
                   echo "[DRY RUN] Would create container: ${CONTAINER_NAME}"
                   echo "[DRY RUN]   in storage account:  ${RESTORE_STORAGE_ACCOUNT}"
-                  echo "##vso[task.setvariable variable=restoreContainerName;isOutput=true]${CONTAINER_NAME}dryrun"
+                  echo "##vso[task.setvariable variable=restoreContainerName;isOutput=true]${CONTAINER_NAME}"
                   exit 0
                 fi
 
@@ -216,7 +226,7 @@ stages:
                 echo "##vso[task.setvariable variable=restoreContainerName;isOutput=true]${CONTAINER_NAME}"
             env:
               SOURCE_SERVER_NAME: ${{ parameters.sourceServerName }}
-              RESTORE_STORAGE_ACCOUNT: $(cppRestoreStorageAccount)
+              RESTORE_STORAGE_ACCOUNT: ${{ parameters.restoreStorageAccount }}
               DRY_RUN: ${{ parameters.dryRun }}
               BUILD_ID: $(Build.BuildId)
               RESTORE_MODE: ${{ parameters.restoreMode }}
@@ -228,6 +238,7 @@ stages:
             condition: ne('${{ parameters.restoreMode }}', 'vault-only')
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
+              visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
@@ -279,7 +290,7 @@ stages:
                   echo "  --version ${VERSION} --storage-size ${STORAGE_GB} \\"
                   echo "  --subnet ${SUBNET_ID} \\"
                   echo "  --private-dns-zone ${DNS_ZONE_ID} \\"
-                  echo "  --high-availability Disabled"
+                  echo "  --high-availability Disabled \\"
                   [[ -n "${_SOURCE_SUB_FLAG}" ]] && echo "  ${_SOURCE_SUB_FLAG}"
                   echo "##vso[task.setvariable variable=restoredServerFqdn;isOutput=true]${EXPECTED_FQDN}"
                   exit 0
@@ -409,6 +420,7 @@ stages:
             displayName: Execute backup-vault restore automation
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
+              visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
@@ -424,7 +436,7 @@ stages:
               RECOVERY_POINT_ID: ${{ parameters.recoveryPointId }}
               RECOVERY_POINT_TIME_UTC: ${{ parameters.recoveryPointTimeUtc }}
               RESTORE_LOCATION: ${{ parameters.restoreLocation }}
-              TARGET_STORAGE_ACCOUNT: $(cppRestoreStorageAccount)
+              TARGET_STORAGE_ACCOUNT: ${{ parameters.restoreStorageAccount }}
               TARGET_STORAGE_CONTAINER: $(restoreContainerName)
               RESTORE_TIMEOUT_MINUTES: ${{ parameters.restoreTimeoutMinutes }}
               POLL_SECONDS: ${{ parameters.pollSeconds }}
@@ -469,6 +481,7 @@ stages:
             displayName: Validate restored database content
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
+              visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |

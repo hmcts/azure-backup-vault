@@ -3,14 +3,6 @@ name: Azure Backup Vault Restore - CNP
 trigger: none
 pr: none
 
-variables:
-  - group: cnp-backup-vault-restore-secrets
-  # Pre-provisioned by Terraform - the only permitted restore target for CNP.
-  # Must match the storage account deployed by the azure-backup-vault Terraform module.
-  # See docs/architecture-decisions.md ADR-002.
-  - name: cnpRestoreStorageAccount
-    value: 'cnpvaultrestorationsprod'
-
 parameters:
   - name: serviceConnection
     type: string
@@ -23,6 +15,12 @@ parameters:
       - hmcts-sds-ptl
       - hmcts-sandbox-agent-pool
       - hmcts-sds-ptlsbox
+  # Pre-provisioned by Terraform - the only permitted restore target for CNP.
+  # Must match the storage account deployed by the azure-backup-vault Terraform module.
+  # See docs/architecture-decisions.md ADR-002.
+  - name: restoreStorageAccount
+    type: string
+    default: "cnpvaultrestorationsprod"
   - name: sourceServerName
     type: string
   - name: sourceResourceGroup
@@ -121,6 +119,8 @@ parameters:
     type: string
     default: '5432'
 
+variables:
+  - group: cnp-backup-vault-restore-secrets
 stages:
   # ---------------------------------------------------------------------------
   # Stage 1: Provision
@@ -158,7 +158,7 @@ stages:
               echo "restoreRoles:                     ${{ parameters.restoreRoles }}"
               echo "restoreTimeoutMinutes:            ${{ parameters.restoreTimeoutMinutes }}"
               echo "pollSeconds:                      ${{ parameters.pollSeconds }}"
-              echo "restoreStorageAccount:            $(cnpRestoreStorageAccount)"
+              echo "restoreStorageAccount:            ${{ parameters.restoreStorageAccount }}"
               echo "============================================================"
             displayName: Print pipeline inputs
 
@@ -218,7 +218,7 @@ stages:
                 echo "##vso[task.setvariable variable=restoreContainerName;isOutput=true]${CONTAINER_NAME}"
             env:
               SOURCE_SERVER_NAME: ${{ parameters.sourceServerName }}
-              RESTORE_STORAGE_ACCOUNT: $(cnpRestoreStorageAccount)
+              RESTORE_STORAGE_ACCOUNT: ${{ parameters.restoreStorageAccount }}
               DRY_RUN: ${{ parameters.dryRun }}
               BUILD_ID: $(Build.BuildId)
               RESTORE_MODE: ${{ parameters.restoreMode }}
@@ -428,7 +428,7 @@ stages:
               RECOVERY_POINT_ID: ${{ parameters.recoveryPointId }}
               RECOVERY_POINT_TIME_UTC: ${{ parameters.recoveryPointTimeUtc }}
               RESTORE_LOCATION: ${{ parameters.restoreLocation }}
-              TARGET_STORAGE_ACCOUNT: $(cnpRestoreStorageAccount)
+              TARGET_STORAGE_ACCOUNT: ${{ parameters.restoreStorageAccount }}
               TARGET_STORAGE_CONTAINER: $(restoreContainerName)
               RESTORE_TIMEOUT_MINUTES: ${{ parameters.restoreTimeoutMinutes }}
               POLL_SECONDS: ${{ parameters.pollSeconds }}
