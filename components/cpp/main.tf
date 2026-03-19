@@ -99,3 +99,21 @@ resource "azurerm_role_assignment" "backup_vault_storage_blob_contributor" {
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = module.backup_vaults[try(each.value.backup_vault_key, "cpp-backup-vault")].backup_vault_principal_id
 }
+
+resource "azurerm_role_assignment" "ado_service_connection" {
+  for_each = var.ado_service_connection_object_id != null ? var.storage_accounts : {}
+
+  scope                = module.restore_storage_account[each.key].storage_account_id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = var.ado_service_connection_object_id
+}
+
+resource "azurerm_role_assignment" "ado_service_connection" {
+  for_each = var.ado_service_connection_object_id != null ? var.backup_vaults : {}
+
+  scope                = module.backup_vaults[each.key].backup_vault_id
+  role_definition_name = "Backup Operator"
+  principal_id         = var.ado_service_connection_object_id
+}
+
+
