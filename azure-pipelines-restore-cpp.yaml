@@ -10,9 +10,6 @@ parameters:
     values:
       - live
       - nonlive
-  - name: serviceConnection
-    type: string
-    default: ado_live_workload_identity
   - name: agentPool
     type: string
     default: MPD-ADO-AGENTS-01
@@ -174,7 +171,7 @@ stages:
             name: createContainer
             displayName: Create restore storage container
             inputs:
-              azureSubscription: ${{ parameters.serviceConnection }}
+              azureSubscription: $(azureServiceConnection)
               visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
@@ -237,7 +234,7 @@ stages:
             displayName: Create or resolve restored Postgres server
             condition: ne('${{ parameters.restoreMode }}', 'vault-only')
             inputs:
-              azureSubscription: ${{ parameters.serviceConnection }}
+              azureSubscription: $(azureServiceConnection)
               visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
@@ -419,7 +416,7 @@ stages:
           - task: AzureCLI@2
             displayName: Execute backup-vault restore automation
             inputs:
-              azureSubscription: ${{ parameters.serviceConnection }}
+              azureSubscription: $(azureServiceConnection)
               visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
@@ -480,7 +477,7 @@ stages:
           - task: AzureCLI@2
             displayName: Validate restored database content
             inputs:
-              azureSubscription: ${{ parameters.serviceConnection }}
+              azureSubscription: $(azureServiceConnection)
               visibleAzLogin: false
               scriptType: bash
               scriptLocation: inlineScript
