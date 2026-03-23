@@ -258,3 +258,62 @@ Run concurrently with Scenario 4.2 to verify the pipeline handles simultaneous r
 - This `rhubarb` instance has a simpler schema (2 tables vs 7 on `plum-v14-flexible-sandbox`) — confirms the restore is faithful to the specific source server's schema, not a fixed template.
 - No `pgstattuple` extension present on this server — clean `pg_restore` exit, no allow-list warnings.
 - The prefix fallback is working as designed: Azure Backup Vault writes blobs with a UUID prefix; the pipeline falls back gracefully when the generated prefix doesn't match.
+
+---
+
+## Stage 5 — CPP pipeline (database-only restore)
+
+Tests the CPP-specific pipeline (`azure-pipelines-restore-cpp.yaml`) against CPP infrastructure, using an existing vault-to-blob restore container and restoring onto a pre-provisioned Postgres server.
+
+### Scenario 5.1 — CPP live database-only restore
+
+**Pipeline:** `azure-pipelines-restore-cpp.yaml`
+**Date:** 2026-03-19
+**Environment:** nonlive (MDV)
+
+| Parameter | Value |
+|---|---|
+| `environment` | `nonlive` |
+| `restoreStorageAccount` | `sacppvaultrestoremdv` |
+| `sourceServerName` | `psf-dev-ccm08-peach` |
+| `sourceResourceGroup` | `RG-DEV-CCM-01` |
+| `vaultResourceGroup` | `cpp-infra-sbox-rg` |
+| `vaultName` | `cpp-backup-vault` |
+| `restoreMode` | `database-only` |
+| `existingRestoreContainer` | `psfdevccm08peach0016190326502952` |
+| `dryRun` | `false` |
+
+**Stage 1 — Provision**
+
+| Checkpoint | Expected | Status |
+|---|---|---|
+| Storage container resolved | Existing container accepted for `database-only` mode | ✅ `psfdevccm08peach0016190326502952` |
+| Postgres server created | `Standard_D2s_v3`, version 11, 32GB, private subnet | ✅ `psf-dev-ccm08-peach-restore-0016190326` ready in ~270s |
+| `shared_preload_libraries` propagated | Source libraries applied to restored server | ✅ `pg_cron,pg_stat_statements` — already matched, no restart needed |
+
+**Stage 2 — Restore (from `restore-metrics.json`)**
+
+| Checkpoint | Expected | Status |
+|---|---|---|
+| Vault restore job | `restoreJobStatus: Completed` | ✅ Completed (~155s) |
+| Target storage account | `sacppvaultrestoremdv` | ✅ Confirmed |
+| Prefix fallback triggered | Blobs found after retrying without prefix filter | ✅ "No blobs matched with prefix 'restore-502947-4615190326', retrying without prefix filter" — 7 blobs found via fallback |
+| System databases skipped | `azure_maintenance`, `azure_sys`, `postgres`, `template1` skipped | ✅ All 4 skipped |
+| `peopleeventstore` restored | Schema + data via `pg_restore` | ✅ 1s — `pg_stat_statements` allow-list WARN, all application objects restored |
+| `peoplesystem` restored | Schema + data via `pg_restore` | ✅ 1s |
+| `peopleviewstore` restored | Schema + data via `pg_restore` | ✅ 1s — `pg_stat_statements` allow-list WARN |
+| Total database restore duration | All DBs restored | ✅ 5s (3 databases) |
+
+**Stage 3 — Validation**
+
+| Checkpoint | Expected | Status |
+|---|---|---|
+| User tables present | Application schema restored | ✅ 9 tables: `databasechangelog`, `databasechangeloglock`, `person`, `processed_event`, `stream_buffer`, `stream_error`, `stream_error_hash`, `stream_status`, `stream_metrics` (materialised view) |
+| `databasechangelog` row count | Schema migrations present | ✅ 30 rows |
+| Totals | `total_tables=9`, `total_estimated_rows=31` | ✅ Confirmed |
+| Pipeline completed successfully | All 3 stages passed | ✅ Confirmed |
+
+**Notes:**
+- `pg_stat_statements` allow-list warnings are benign — the extension is managed by Azure and does not affect application data. The script correctly detects these as non-fatal and logs a WARN rather than failing.
+- Dev server (`psf-dev-ccm08-peach`) has sparse data — 0 rows in most tables is expected for a dev environment; `databasechangelog` row count confirms Liquibase migrations applied successfully on the source.
+- `stream_metrics` appears as a materialised view and is counted in `pg_stat_user_tables`, contributing 1 row to the total.

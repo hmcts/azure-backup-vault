@@ -448,29 +448,30 @@ EOF
     --arg vaultName "$VAULT_NAME" \
     --arg backupInstanceName "$selected_instance_name" \
     --arg recoveryPointId "$selected_recovery_point_id" \
-    --arg restoreJobName "$restore_job_name" \
-    --arg restoreJobStatus "$job_state" \
+    --arg vaultRestoreJobId "$restore_job_name" \
+    --arg vaultRestoreJobStatus "$job_state" \
     --arg targetStorageAccount "$TARGET_STORAGE_ACCOUNT" \
     --arg targetStorageContainer "$TARGET_STORAGE_CONTAINER" \
     --arg restoreLocation "$RESTORE_LOCATION" \
-    --arg restoreTargetFileName "$restore_target_file_name" \
-    --arg startedAtUtc "$started_utc" \
-    --arg endedAtUtc "$ended_utc" \
-    --argjson restoreDurationSeconds "$restore_duration_seconds" \
+    --arg blobNamePrefix "$restore_target_file_name" \
+    --arg vaultPhaseStartedAtUtc "$started_utc" \
+    --arg vaultPhaseEndedAtUtc "$ended_utc" \
+    --argjson vaultPhaseDurationSeconds "$restore_duration_seconds" \
     '{
       vaultResourceGroup: $vaultResourceGroup,
       vaultName: $vaultName,
       backupInstanceName: $backupInstanceName,
       recoveryPointId: $recoveryPointId,
-      restoreJobName: $restoreJobName,
-      restoreJobStatus: $restoreJobStatus,
+      vaultRestoreJobId: $vaultRestoreJobId,
+      vaultRestoreJobStatus: $vaultRestoreJobStatus,
       targetStorageAccount: $targetStorageAccount,
       targetStorageContainer: $targetStorageContainer,
       restoreLocation: $restoreLocation,
-      restoreTargetFileName: $restoreTargetFileName,
-      startedAtUtc: $startedAtUtc,
-      endedAtUtc: $endedAtUtc,
-      restoreDurationSeconds: $restoreDurationSeconds
+      blobNamePrefix: $blobNamePrefix,
+      vaultPhaseStartedAtUtc: $vaultPhaseStartedAtUtc,
+      vaultPhaseEndedAtUtc: $vaultPhaseEndedAtUtc,
+      vaultPhaseDurationSeconds: $vaultPhaseDurationSeconds,
+      vaultPhaseDurationMinutes: ($vaultPhaseDurationSeconds / 60 * 10 | round | . / 10)
     }' > "$metrics_file"
 
   if [[ "$job_state" != "Completed" && "$job_state" != "Succeeded" && "$job_state" != "CompletedWithWarnings" ]]; then
@@ -703,15 +704,16 @@ EOF
 
     local db_entry
     db_entry=$(jq -n \
-      --arg databaseBlob "$database_blob_name" \
+      --arg sourceBlobName "$database_blob_name" \
       --arg databaseName "$db_name" \
       --arg dbRestoreTool "$db_restore_tool" \
       --argjson durationSeconds "$db_restore_duration_seconds" \
       '{
-        databaseBlob: $databaseBlob,
+        sourceBlobName: $sourceBlobName,
         databaseName: $databaseName,
         restoreTool: $dbRestoreTool,
-        durationSeconds: $durationSeconds
+        durationSeconds: $durationSeconds,
+        durationMinutes: ($durationSeconds / 60 * 10 | round | . / 10)
       }')
     db_results_json=$(echo "$db_results_json" | jq --argjson entry "$db_entry" '. + [$entry]')
 
@@ -732,7 +734,7 @@ EOF
       --arg restoreScope "$restore_scope" \
       --arg targetStorageAccount "$TARGET_STORAGE_ACCOUNT" \
       --arg targetStorageContainer "$TARGET_STORAGE_CONTAINER" \
-      --arg rolesBlob "$roles_blob_name" \
+      --arg rolesBlobName "$roles_blob_name" \
       --arg targetPostgresHost "$TARGET_POSTGRES_HOST" \
       --argjson databaseRestores "$db_results_json" \
       --argjson totalDurationSeconds "$total_db_restore_duration_seconds" \
@@ -740,23 +742,25 @@ EOF
         restoreScope: $restoreScope,
         targetStorageAccount: $targetStorageAccount,
         targetStorageContainer: $targetStorageContainer,
-        rolesBlob: $rolesBlob,
+        rolesBlobName: $rolesBlobName,
         targetPostgresHost: $targetPostgresHost,
         databaseRestores: $databaseRestores,
-        totalDatabaseRestoreDurationSeconds: $totalDurationSeconds
+        databasePhaseDurationSeconds: $totalDurationSeconds,
+        databasePhaseDurationMinutes: ($totalDurationSeconds / 60 * 10 | round | . / 10)
       }' > "$metrics_file"
   else
     # Append DB restore details to the existing vault restore metrics
     jq \
-      --arg rolesBlob "$roles_blob_name" \
+      --arg rolesBlobName "$roles_blob_name" \
       --arg targetPostgresHost "$TARGET_POSTGRES_HOST" \
       --argjson databaseRestores "$db_results_json" \
       --argjson totalDurationSeconds "$total_db_restore_duration_seconds" \
       '. + {
-        rolesBlob: $rolesBlob,
+        rolesBlobName: $rolesBlobName,
         targetPostgresHost: $targetPostgresHost,
         databaseRestores: $databaseRestores,
-        totalDatabaseRestoreDurationSeconds: $totalDurationSeconds
+        databasePhaseDurationSeconds: $totalDurationSeconds,
+        databasePhaseDurationMinutes: ($totalDurationSeconds / 60 * 10 | round | . / 10)
       }' "$metrics_file" > "${metrics_file}.tmp"
     mv "${metrics_file}.tmp" "$metrics_file"
   fi
