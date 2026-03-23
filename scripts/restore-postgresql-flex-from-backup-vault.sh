@@ -646,6 +646,10 @@ EOF
     local pg_restore_log="restore-output/pg_restore-${db_name}.log"
     local db_restore_tool="pg_restore"
     set +e
+    # Disable statement_timeout (source server value may have been dumped into
+    # the backup) and enable TCP keepalives to prevent the server or network
+    # from dropping long-running COPY connections for large tables.
+    PGOPTIONS="-c statement_timeout=0 -c tcp_keepalives_idle=60 -c tcp_keepalives_interval=10 -c tcp_keepalives_count=6" \
     pg_restore \
       -h "$TARGET_POSTGRES_HOST" \
       -p "$postgres_port" \
