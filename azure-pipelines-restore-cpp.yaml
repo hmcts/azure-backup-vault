@@ -118,6 +118,13 @@ parameters:
   - name: targetPostgresPort
     type: string
     default: '5432'
+  # Override the storage size (GB) provisioned on the restore server.
+  # Defaults to 'auto' which mirrors the source server's configured storage.
+  # Set a higher value when the source database has grown beyond its originally
+  # provisioned storage capacity (e.g. due to auto-grow).
+  - name: targetStorageGb
+    type: string
+    default: 'auto'
 
 variables:
   - ${{ if eq(parameters.environment, 'live') }}:
@@ -261,6 +268,11 @@ stages:
                 DNS_ZONE_ID=$(echo "$SOURCE" | jq -r '.network.privateDnsZoneArmResourceId')
                 SOURCE_LOCATION=$(echo "$SOURCE" | jq -r '.location' | tr '[:upper:]' '[:lower:]' | tr -d ' ')
 
+                if [[ -n "${TARGET_STORAGE_GB:-}" && "${TARGET_STORAGE_GB}" != "auto" ]]; then
+                  echo "Storage override: using ${TARGET_STORAGE_GB}GB (source configured: ${STORAGE_GB}GB)"
+                  STORAGE_GB="${TARGET_STORAGE_GB}"
+                fi
+
                 echo "Source server config:"
                 echo "  SKU:      ${SKU_NAME} (${SKU_TIER})"
                 echo "  Version:  ${VERSION}"
@@ -285,6 +297,7 @@ stages:
                   echo "  --location ${SOURCE_LOCATION} \\"
                   echo "  --sku-name ${SKU_NAME} --tier ${SKU_TIER} \\"
                   echo "  --version ${VERSION} --storage-size ${STORAGE_GB} \\"
+                  echo "  --storage-auto-grow Enabled \\"
                   echo "  --subnet ${SUBNET_ID} \\"
                   echo "  --private-dns-zone ${DNS_ZONE_ID} \\"
                   echo "  --high-availability Disabled \\"
@@ -313,6 +326,7 @@ stages:
                     --tier "${SKU_TIER}" \
                     --version "${VERSION}" \
                     --storage-size "${STORAGE_GB}" \
+                    --storage-auto-grow Enabled \
                     --subnet "${SUBNET_ID}" \
                     --private-dns-zone "${DNS_ZONE_ID}" \
                     --high-availability Disabled \
@@ -392,6 +406,7 @@ stages:
               RESTORED_SERVER_NAME: ${{ parameters.restoredServerName }}
               RESTORE_MODE: ${{ parameters.restoreMode }}
               DRY_RUN: ${{ parameters.dryRun }}
+              TARGET_STORAGE_GB: ${{ parameters.targetStorageGb }}
 
   # ---------------------------------------------------------------------------
   # Stage 2: Restore
