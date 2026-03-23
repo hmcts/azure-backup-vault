@@ -471,7 +471,7 @@ EOF
       vaultPhaseStartedAtUtc: $vaultPhaseStartedAtUtc,
       vaultPhaseEndedAtUtc: $vaultPhaseEndedAtUtc,
       vaultPhaseDurationSeconds: $vaultPhaseDurationSeconds,
-      vaultPhaseDurationMinutes: ($vaultPhaseDurationSeconds / 60 * 10 | round | . / 10)
+      vaultPhaseDurationMinutes: "\($vaultPhaseDurationSeconds / 60 | floor)min \($vaultPhaseDurationSeconds % 60)s"
     }' > "$metrics_file"
 
   if [[ "$job_state" != "Completed" && "$job_state" != "Succeeded" && "$job_state" != "CompletedWithWarnings" ]]; then
@@ -713,7 +713,7 @@ EOF
         databaseName: $databaseName,
         restoreTool: $dbRestoreTool,
         durationSeconds: $durationSeconds,
-        durationMinutes: ($durationSeconds / 60 * 10 | round | . / 10)
+        durationMinutes: "\($durationSeconds / 60 | floor)min \($durationSeconds % 60)s"
       }')
     db_results_json=$(echo "$db_results_json" | jq --argjson entry "$db_entry" '. + [$entry]')
 
@@ -746,7 +746,7 @@ EOF
         targetPostgresHost: $targetPostgresHost,
         databaseRestores: $databaseRestores,
         databasePhaseDurationSeconds: $totalDurationSeconds,
-        databasePhaseDurationMinutes: ($totalDurationSeconds / 60 * 10 | round | . / 10)
+        databasePhaseDurationMinutes: "\($totalDurationSeconds / 60 | floor)min \($totalDurationSeconds % 60)s"
       }' > "$metrics_file"
   else
     # Append DB restore details to the existing vault restore metrics
@@ -760,7 +760,7 @@ EOF
         targetPostgresHost: $targetPostgresHost,
         databaseRestores: $databaseRestores,
         databasePhaseDurationSeconds: $totalDurationSeconds,
-        databasePhaseDurationMinutes: ($totalDurationSeconds / 60 * 10 | round | . / 10)
+        databasePhaseDurationMinutes: "\($totalDurationSeconds / 60 | floor)min \($totalDurationSeconds % 60)s"
       }' "$metrics_file" > "${metrics_file}.tmp"
     mv "${metrics_file}.tmp" "$metrics_file"
   fi
