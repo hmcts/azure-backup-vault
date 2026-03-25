@@ -317,3 +317,121 @@ Tests the CPP-specific pipeline (`azure-pipelines-restore-cpp.yaml`) against CPP
 - `pg_stat_statements` allow-list warnings are benign — the extension is managed by Azure and does not affect application data. The script correctly detects these as non-fatal and logs a WARN rather than failing.
 - Dev server (`psf-dev-ccm08-peach`) has sparse data — 0 rows in most tables is expected for a dev environment; `databasechangelog` row count confirms Liquibase migrations applied successfully on the source.
 - `stream_metrics` appears as a materialised view and is counted in `pg_stat_user_tables`, contributing 1 row to the total.
+
+---
+
+### Scenario 4.4 — Live full restore: large-scale pgbench database
+
+**Date:** 2026-03-24
+**Purpose:** Establish real-world RTO for a large single-database workload (~200M row pgbench dataset).
+
+| Parameter | Value |
+|---|---|
+| `agentPool` | `hmcts-sandbox-agent-pool` |
+| `dryRun` | `false` |
+| `restoreMode` | `all` |
+| `sourceServerName` | `plum-v14-flexible-sandbox` |
+| `sourceResourceGroup` | `plum-v14-flexible-data-sandbox` |
+| `sourceSubscription` | `'none'` |
+| `vaultResourceGroup` | `mgmt-infra-prod-rg` |
+| `vaultName` | `cnp-backup-vault` |
+| `recoveryPointTimeUtc` | `'none'` (latest, resolved to `b9ee622c70244e93b59d5be4732f3dbe @ 2026-03-23T21:58:44Z`) |
+
+**Source database state at backup point:**
+`plum` contained a pgbench s=2500 dataset: `pgbench_accounts` (250,000,000 rows), `pgbench_tellers` (25,000), `pgbench_branches` (2,500), `pgbench_history` (0). Total 250,027,500 rows, ~35GB.
+`rhubarb` contained the standard 7-table test schema (19 rows).
+
+**Timings observed:**
+
+| Phase | Start (UTC) | End (UTC) | Duration |
+|---|---|---|---|
+| Vault restore job | 08:23:44 | 08:26:19 | ~2m 35s (155s) |
+| Blob download (`plum`) | 08:26:21 | 08:26:27 | ~6s |
+| `pg_restore` COPY (`pgbench_accounts`) | 08:26:28 | 08:55:19 | ~29m (1,731s) |
+| Primary key build (`pgbench_accounts_pkey`) | 08:55:19 | 10:26:18 | **~1h 31m (5,459s)** |
+| `rhubarb` restore | 10:26:19 | 10:26:21 | 2s |
+| **Total database phase** | 08:26:20 | 10:26:21 | **7,201s (~2h 0m)** |
+| **Total pipeline** | 08:23:29 | 10:26:21 | **~2h 3m** |
+
+| Checkpoint | Expected | Status |
+|---|---|---|
+| Vault restore job completed | `restoreJobStatus: Completed` | ✅ `defa4e87-56b1-4fe7-bef3-cdcde68a2504` → Completed (~2m 35s) |
+| Prefix fallback triggered | 6 blobs found after retrying without prefix filter | ✅ "No blobs matched with prefix 'restore-1057064-2308240326'" — fallback succeeded |
+| `plum` restored with pgbench data | COPY + primary key build complete, no errors | ✅ 7,191s total |
+| `rhubarb` restored with allow-list warning | `pgstattuple` rejected, WARN logged, restore continues | ✅ WARN logged — all application objects restored |
+| System databases skipped | `azure_maintenance`, `azure_sys`, `postgres`, `template1` skipped | ✅ Confirmed |
+| Stage 3: `plum` user tables | 4 pgbench tables present | ✅ `pgbench_accounts`, `pgbench_branches`, `pgbench_history`, `pgbench_tellers` |
+| Stage 3: `plum` row counts | s=2500 dataset faithfully restored | ✅ `pgbench_accounts`: 250,000,000 · `pgbench_tellers`: 25,000 · `pgbench_branches`: 2,500 · `pgbench_history`: 0 |
+| Stage 3: `plum` totals | `total_tables=4`, `total_estimated_rows=250,027,500` | ✅ Confirmed |
+| Stage 3: `rhubarb` totals | `total_tables=7`, `total_estimated_rows=19` | ✅ Confirmed |
+| Pipeline completed successfully | All 3 stages passed | ✅ Confirmed |
+
+**Key RTO finding — index rebuild dominates restore time:**
+For large databases on Standard Premium SSD (P6, 240 IOPS), the **primary key / index rebuild phase is the dominant RTO factor**, not the data COPY:
+
+| Phase | Duration | % of DB restore |
+|---|---|---|
+| Data COPY (`pgbench_accounts`) | 29m | 24% |
+| Primary key index build | **1h 31m** | **76%** |
+
+This matters because `pg_restore` performs all COPY operations first, then builds all indexes and constraints afterwards. For a database with a 28GB table, building a B-tree primary key index on 200M rows required sorting the full dataset — 240 IOPS is the limiting factor. A server with higher IOPS (P10: 500 IOPS, P15: 1,100 IOPS, P20: 2,300 IOPS) would reduce the index rebuild time proportionally.
+
+For production RTO planning, identify the largest tables and their index count, as index rebuild time scales with table size and is bounded by disk IOPS. The actual data transfer (COPY) is typically a small fraction of total restore time for large tables.
+
+---
+
+## Appendix: pgbench scale factor guidance and WAL accumulation
+
+When using `pgbench -i -s <N>` to generate synthetic test data for large-scale RTO testing,
+choose the scale factor carefully relative to the server's disk size.
+
+### How pgbench initialisation works
+
+`pgbench --init-steps=dtgvp` creates a `pgbench_accounts` table and populates it via a single
+`COPY` statement — all rows in one transaction, regardless of scale factor. The data volumes
+are approximately:
+
+| Scale factor | Rows (`pgbench_accounts`) | Data size | Recommended minimum disk |
+|---|---|---|---|
+| 100 | 10 million | ~1.4 GB | 16 GB |
+| 1000 | 100 million | ~14 GB | 64 GB |
+| 2500 | 250 million | ~35 GB | 128 GB |
+| 3000 | 300 million | ~42 GB | 128 GB |
+
+### The WAL accumulation issue
+
+During `pg_restore`, PostgreSQL issues each table's data as a separate `COPY` transaction. Under
+normal conditions (data spread across many tables) each transaction is small and WAL is recycled
+between tables. For a synthetic database where a single table (`pgbench_accounts`) holds all the
+data, the entire dataset is loaded in **one continuous `COPY` transaction**.
+
+PostgreSQL cannot recycle WAL segments while a transaction that generated them is still open. As
+the `COPY` writes data, WAL accumulates alongside it and **cannot be freed until the `COPY`
+completes**. Peak disk consumption is therefore approximately:
+
+```
+peak disk = data written so far + WAL accumulated since COPY began
+         ≈ 2 × table size  (at the point the COPY finishes)
+```
+
+For s=2500 on a 64 GB disk: 35 GB data + 35 GB WAL ≈ 70 GB — exceeding the disk capacity.
+Azure storage auto-grow cannot react quickly enough to bulk COPYs loading tens of gigabytes
+per minute; it triggers at 95% utilisation and takes 1–2 minutes to allocate, by which time
+the disk is already full.
+
+This is a synthetic testing artefact only. Real production databases distribute data across many
+tables; no single `COPY` transaction ever approaches total database size, so WAL recycling keeps
+pace with individual table restores without issue.
+
+### Recommended scale factors for sandbox testing
+
+| Server disk size | Maximum safe scale factor | Notes |
+|---|---|---|
+| 32 GB | s=500 | ~7 GB data, ~14 GB peak with WAL |
+| 64 GB | s=1000 | ~14 GB data, ~28 GB peak with WAL |
+| 128 GB | s=2500 | ~35 GB data, ~70 GB peak with WAL |
+| 256 GB | s=5000 | upper bound for P30 Premium SSD |
+
+For scale factors above the recommended ceiling, either increase the server disk size before
+running `pgbench -i`, or enable `wal_compression` on the server to reduce WAL footprint
+(see [future-improvements.md](future-improvements.md)).

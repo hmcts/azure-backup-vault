@@ -140,7 +140,8 @@ roles_restore_has_unexpected_errors() {
   fi
 
   # Ignore known, environment-specific role replay errors in managed PostgreSQL.
-  grep -Ev 'role ".*" already exists|must be superuser to create role|must be superuser to alter role|permission denied to create role|permission denied to alter role|cannot execute CREATE ROLE in a read-only transaction|cannot execute ALTER ROLE in a read-only transaction' "$roles_errors_file" > "$roles_critical_file" || true
+  # See: https://learn.microsoft.com/en-us/azure/backup/backup-azure-database-postgresql-flex-support-matrix#limitation
+  grep -Ev 'role ".*" already exists|must be superuser to create role|must be superuser to alter role|permission denied to create role|permission denied to alter role|cannot execute CREATE ROLE in a read-only transaction|cannot execute ALTER ROLE in a read-only transaction|permission denied granting privileges as role|Only roles with the ADMIN option on role "pg_use_reserved_connections"' "$roles_errors_file" > "$roles_critical_file" || true
 
   if [[ -s "$roles_critical_file" ]]; then
     return 0
@@ -649,6 +650,11 @@ EOF
     # Disable statement_timeout (source server value may have been dumped into
     # the backup) and enable TCP keepalives to prevent the server or network
     # from dropping long-running COPY connections for large tables.
+    # -j 3: use 3 parallel workers for data load and index build phases.
+    # Workers operate on independent tables/indexes; if there is only one table
+    # the extra workers sit idle — no errors, no wasted work. Only applies to
+    # custom-format dumps (Azure Backup Vault default); plain-text SQL files
+    # trigger the psql fallback below which is unaffected by this flag.
     PGOPTIONS="-c statement_timeout=0 -c tcp_keepalives_idle=60 -c tcp_keepalives_interval=10 -c tcp_keepalives_count=6" \
     pg_restore \
       -h "$TARGET_POSTGRES_HOST" \
@@ -657,6 +663,7 @@ EOF
       -d "$db_name" \
       --no-owner \
       --no-privileges \
+      -j 3 \
       -v \
       "$db_file" 2>&1 | tee "$pg_restore_log"
     local pg_restore_exit_code=${PIPESTATUS[0]}
