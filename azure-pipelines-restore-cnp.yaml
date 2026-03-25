@@ -125,6 +125,20 @@ parameters:
   - name: targetStorageGb
     type: string
     default: 'auto'
+  # Override the SKU for the restored Postgres server.
+  # Defaults to 'none' which mirrors the source server's SKU and tier.
+  # Set this to improve restore performance when the source is a small SKU
+  # (e.g. B1ms with P6 240 IOPS). A larger SKU combined with targetStorageGb
+  # increases both CPU/RAM for parallel index builds and IOPS for I/O throughput.
+  # Format: SKU name only — tier is derived automatically from the name prefix.
+  #   Burstable:       Standard_B1ms, Standard_B2s, Standard_B2ms ...
+  #   GeneralPurpose:  Standard_D2ds_v4, Standard_D4ds_v4, Standard_D8ds_v4 ...
+  #   MemoryOptimized: Standard_E2ds_v4, Standard_E4ds_v4, Standard_E8ds_v4 ...
+  # Example: set targetSku=Standard_D4ds_v4 and targetStorageGb=256 for a
+  # high-IOPS restore target (1100 IOPS baseline vs 240 on B1ms+64GB).
+  - name: targetSku
+    type: string
+    default: 'none'
 
 variables:
   - group: cnp-backup-vault-restore-secrets
@@ -268,8 +282,22 @@ stages:
                   STORAGE_GB="${TARGET_STORAGE_GB}"
                 fi
 
-                echo "Source server config:"
-                echo "  SKU:      ${SKU_NAME} (${SKU_TIER})"
+                if [[ -n "${TARGET_SKU:-}" && "${TARGET_SKU}" != "none" ]]; then
+                  SKU_NAME="${TARGET_SKU}"
+                  # Derive tier from SKU name prefix (Standard_B* = Burstable,
+                  # Standard_D* = GeneralPurpose, Standard_E* = MemoryOptimized).
+                  case "${SKU_NAME}" in
+                    Standard_B*) SKU_TIER="Burstable" ;;
+                    Standard_D*) SKU_TIER="GeneralPurpose" ;;
+                    Standard_E*) SKU_TIER="MemoryOptimized" ;;
+                    *)
+                      echo "ERROR: Cannot determine tier for SKU '${SKU_NAME}'."
+                      echo "       Expected prefix Standard_B*, Standard_D*, or Standard_E*."
+                      exit 1
+                      ;;
+                  esac
+                  echo "SKU override: using ${SKU_NAME} (${SKU_TIER}) (source was: $(echo "$SOURCE" | jq -r '.sku.name') ($(echo "$SOURCE" | jq -r '.sku.tier')))"
+                fi
                 echo "  Version:  ${VERSION}"
                 echo "  Storage:  ${STORAGE_GB}GB"
                 echo "  Location: ${SOURCE_LOCATION}"
@@ -402,11 +430,7 @@ stages:
               RESTORE_MODE: ${{ parameters.restoreMode }}
               DRY_RUN: ${{ parameters.dryRun }}
               TARGET_STORAGE_GB: ${{ parameters.targetStorageGb }}
-
-  # ---------------------------------------------------------------------------
-  # Stage 2: Restore
-  # Runs the restore script to move the backup from vault to blob storage and
-  # then restore it onto the new Postgres instance.
+              TARGET_SKU: ${{ parameters.targetSku }}
   # ---------------------------------------------------------------------------
   - stage: Restore
     displayName: 'Stage 2: Restore backup to database'
