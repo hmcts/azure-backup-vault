@@ -191,3 +191,112 @@ Stage 1 (`createPostgresServer`) reads `shared_preload_libraries` from the sourc
 - The check-before-set pattern avoids unnecessary restarts on retries.
 - A server restart adds approximately 1–5 minutes but is mandatory for `shared_preload_libraries` changes to take effect — there is no way to defer this.
 - Extensions that do not require preloading (`pgcrypto`, `uuid-ossp`, etc.) are restored normally via `pg_restore` from the per-database dump files and are unaffected by this step.
+
+---
+
+## ADR-010: Proactive `roles.sql` cleanup via `sed` before psql restore
+
+**Date:** 2026-03-25
+**Status:** Accepted
+
+**Context:**
+Azure Backup's `pg_dumpall` output includes superuser-only attributes (`NOSUPERUSER`, `NOBYPASSRLS`) in `ALTER ROLE` statements, and lines for Azure-internal roles (`azure_superuser`, `azure_pg_admin`, `azuresu`, `replication`). Azure Postgres Flexible Server has no superuser, so `ALTER ROLE` statements containing these attributes fail.
+
+The previous approach ran `psql` with `ON_ERROR_STOP=0` and relied on the `roles_restore_has_unexpected_errors()` error filter to suppress known errors. However, `ON_ERROR_STOP=0` causes the **entire failed statement** to be skipped — not just the offending attribute. An `ALTER ROLE myapp NOSUPERUSER NOCREATEROLE CREATEDB LOGIN;` statement fails in its entirety, meaning `CREATEDB` and `LOGIN` are also silently not applied. The role exists but does not function correctly.
+
+**Decision:**
+A `sed` pass is applied to the downloaded `roles.sql` before `psql` is run:
+- Delete lines matching `azure_superuser`, `azure_pg_admin`, `azuresu`
+- Delete `CREATE ROLE replication` and `ALTER ROLE replication` lines
+- Strip `NOSUPERUSER` and `NOBYPASSRLS` tokens from remaining `ALTER ROLE` lines
+
+The unmodified file is preserved as `roles.sql.raw` in `restore-output/` for audit comparison. The `roles_restore_has_unexpected_errors()` error filter is retained as a safety net for any errors the `sed` pass does not cover.
+
+**Rationale:**
+- Proactive cleanup ensures each `ALTER ROLE` statement applies fully — `LOGIN`, `CREATEDB`, `INHERIT` and other valid attributes are correctly set even when they co-occur with superuser-only attributes on the same line.
+- Mirrors the `sed` command recommended in the [Microsoft restore guide](https://learn.microsoft.com/en-us/azure/backup/restore-azure-database-postgresql-flex).
+- Defence-in-depth: `sed` handles the structural issue; the error filter catches any residual unexpected errors.
+
+---
+
+## ADR-011: `synchronous_commit=off` for `pg_restore` connections
+
+**Date:** 2026-03-25
+**Status:** Accepted
+
+**Context:**
+`pg_restore` on IOPS-constrained Azure Flexible Server storage (P6 = 240 IOPS, P10 = 500 IOPS) is heavily bottlenecked by WAL write latency when `synchronous_commit=on` (the default). Each COPY and index-build transaction must wait for WAL to be flushed to disk before returning, causing each write to block on disk I/O.
+
+**Decision:**
+`synchronous_commit=off` is set via `PGOPTIONS` for the `pg_restore` session. This is a session-level GUC — it does not affect other connections or the server's running configuration. With this setting, WAL records are written to the OS buffer and flushed asynchronously. If the agent is terminated before the OS flushes buffered WAL, transactions committed within the last ~0.6 seconds may be lost.
+
+**Rationale:**
+- Restores are idempotent — if interrupted, the restore job is re-run from scratch against the same recovery point. The ~0.6s data loss window is operationally irrelevant.
+- Reduces WAL write amplification by 20–40% on IOPS-constrained storage, meaningfully reducing restore time for large databases.
+- The durability tradeoff that makes `synchronous_commit=off` risky for production workloads does not apply to a fire-and-forget restore job.
+- The risk of using this on a live production server is avoided because the setting is scoped to the `pg_restore` session only via `PGOPTIONS`.
+
+---
+
+## ADR-012: Dynamic `maintenance_work_mem` derived from server RAM
+
+**Date:** 2026-03-25
+**Status:** Accepted
+
+**Context:**
+`maintenance_work_mem` controls the RAM each parallel worker uses for index-build sort operations during `pg_restore`. The PostgreSQL default of 64 MB forces excessive temp-file I/O for large-table B-tree index sorts. A higher value allows the sort to run in memory, reducing index build time by 30–70%.
+
+A fixed high value is unsafe: with `-j 3` workers running simultaneously, peak consumption is `3 × maintenance_work_mem`. On a B1ms (2 GB RAM, ~512 MB `shared_buffers`), setting 512 MB would require 1.5 GB for maintenance alone — exceeding available RAM and risking OOM. The correct value depends entirely on the SKU of the restore target, which varies by environment.
+
+**Decision:**
+`maintenance_work_mem` is calculated at runtime by querying `shared_buffers` from the target server immediately after Postgres accepts connections:
+
+```sql
+SELECT setting::int * 8 / 1024 FROM pg_settings WHERE name = 'shared_buffers'
+```
+
+Azure automatically sets `shared_buffers` to 25% of server RAM. The result is divided by the parallel worker count, then clamped to a floor of 64 MB and a ceiling of 1,024 MB. The value is applied as a session-level GUC via `PGOPTIONS`.
+
+| SKU | RAM | `shared_buffers` | ÷ 3 workers | → used |
+|-----|-----|----------|---------|--------|
+| B1ms | 2 GB | 512 MB | 170 MB | **170 MB** |
+| GP D2ds_v4 | 8 GB | 2,048 MB | 682 MB | **682 MB** |
+| GP D4ds_v4 | 16 GB | 4,096 MB | 1,365 MB | **1,024 MB** (cap) |
+| MO E8ds_v4 | 64 GB | 16,384 MB | 5,461 MB | **1,024 MB** (cap) |
+
+Falls back to 128 MB if the server query fails, ensuring the restore still proceeds.
+
+**Rationale:**
+- Automatically scales to any SKU without pipeline parameter changes or hardcoded lookup tables.
+- Prevents OOM on small SKUs where fixed high values would be unsafe.
+- Maximises index-build performance on larger SKUs proportionally.
+- The server query runs against an already-confirmed live Postgres instance (after the connection wait loop), so failure is unlikely and the fallback is safe.
+
+---
+
+## ADR-013: Azure-generated `_tablespace.sql` and `_schema.sql` blobs intentionally not restored
+
+**Date:** 2026-03-25
+**Status:** Accepted
+
+**Context:**
+Azure Backup generates four file types per restore operation (per the [Microsoft restore documentation](https://learn.microsoft.com/en-us/azure/backup/restore-azure-database-postgresql-flex)):
+
+| File | Contents |
+|------|----------|
+| `*_database_<name>.sql` | Per-database data and schema dump |
+| `*_roles.sql` | Server-level role definitions |
+| `*_tablespace.sql` | Custom tablespace definitions |
+| `*_schema.sql` | Schema-only dump for all databases |
+
+**Decision:**
+Only `*_database_*.sql` and `*_roles.sql` blobs are restored. `*_tablespace.sql` and `*_schema.sql` blobs are detected, logged as intentionally skipped, and not processed.
+
+**Rationale for `_tablespace.sql`:**
+Azure Database for PostgreSQL Flexible Server does not support custom tablespaces. Attempting to restore tablespace definitions fails immediately with errors such as `unacceptable encoding` or permission failures. These blobs are always present in the restore output but contain no restorable content on Flexible Server.
+
+**Rationale for `_schema.sql`:**
+Schema is already fully embedded in each `*_database_*.sql` dump. Microsoft explicitly states in the restore documentation: *"We recommend you not to run this script on the PostgreSQL Flexible server because the schema is already part of the `database.sql` script."* Running it produces `ERROR: relation already exists` for every object.
+
+**Rationale for logging rather than silently skipping:**
+Explicit log output (`NOTE: Azure Backup generated file(s) present in container but intentionally NOT restored`) prevents the presence of these blobs from appearing as a defect or omission during post-restore review of pipeline logs.

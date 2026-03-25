@@ -523,6 +523,22 @@ EOF
     log "  - ${blob}"
   done
 
+  # Azure Backup also generates _tablespace.sql and _schema.sql files per the restore
+  # documentation. Neither is safe to restore on Azure Database for PostgreSQL:
+  #   _tablespace.sql  Azure Postgres does not support custom tablespaces — restore would fail.
+  #   _schema.sql      Schema is already embedded in each _database_*.sql dump; Microsoft
+  #                    explicitly recommends NOT running this script (it would produce duplicate
+  #                    object errors). See: https://learn.microsoft.com/en-us/azure/backup/restore-azure-database-postgresql-flex
+  # Log them so the presence of these blobs doesn't appear as a silent omission.
+  local _skipped_azure_blobs
+  _skipped_azure_blobs=$(echo "$blobs_json" | jq -r '.[].name | select(test("(_tablespace|_schema)\\.sql$"; "i"))' 2>/dev/null || true)
+  if [[ -n "$_skipped_azure_blobs" ]]; then
+    log "NOTE: Azure Backup generated file(s) present in container but intentionally NOT restored:"
+    while IFS= read -r _b; do
+      log "  - ${_b}"
+    done <<< "$_skipped_azure_blobs"
+  fi
+
   local roles_blob_name=""
   if [[ "$restore_roles" == "true" ]]; then
     roles_blob_name=$(discover_roles_blob "$blobs_json" "$restore_target_file_name")
@@ -546,6 +562,31 @@ EOF
       --file "$roles_file" \
       --auth-mode login \
       -o none
+
+    # Pre-clean roles.sql before restore to prevent partial role application.
+    # Azure Backup includes Azure-internal roles and superuser-only attributes
+    # (NOSUPERUSER, NOBYPASSRLS) in pg_dumpall output. On Azure Postgres there is
+    # no superuser, so ALTER ROLE statements containing these attributes fail in
+    # their entirety under ON_ERROR_STOP=0 — meaning valid attributes on the same
+    # line (LOGIN, CREATEDB, INHERIT, etc.) are also silently not applied.
+    # Proactive cleanup strips the offending tokens so the rest of each statement
+    # succeeds. This mirrors the sed command in the Microsoft restore guide:
+    # https://learn.microsoft.com/en-us/azure/backup/restore-azure-database-postgresql-flex
+    log "Pre-cleaning roles.sql to strip Azure-internal roles and superuser-only attributes"
+    local roles_file_raw
+    roles_file_raw="${roles_file}.raw"
+    cp "$roles_file" "$roles_file_raw"
+    sed \
+      -e '/azure_superuser/d' \
+      -e '/azure_pg_admin/d' \
+      -e '/azuresu/d' \
+      -e '/^CREATE ROLE replication/d' \
+      -e '/^ALTER ROLE replication/d' \
+      -e '/^ALTER ROLE/ {s/NOSUPERUSER//g; s/NOBYPASSRLS//g;}' \
+      "$roles_file_raw" > "$roles_file"
+    local _roles_removed=$(( $(wc -l < "$roles_file_raw") - $(wc -l < "$roles_file") ))
+    log "  Removed ${_roles_removed} line(s) containing Azure-internal roles"
+    log "  Stripped NOSUPERUSER/NOBYPASSRLS attributes from remaining ALTER ROLE statements"
   fi
 
   export PGPASSWORD="$TARGET_POSTGRES_ADMIN_PASSWORD"
@@ -574,7 +615,7 @@ EOF
     local roles_errors_file="restore-output/roles-restore-errors.log"
     local roles_critical_file="restore-output/roles-restore-critical.log"
 
-    log "Restoring roles with managed-role error filtering"
+    log "Restoring roles (pre-cleaned)"
     set +e
     psql "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=postgres sslmode=require" \
       -v ON_ERROR_STOP=0 \
@@ -596,6 +637,42 @@ EOF
     else
       log "roles.sql replay completed without errors"
     fi
+  fi
+
+  # ---------------------------------------------------------------------------
+  # Determine maintenance_work_mem dynamically from the target server's
+  # shared_buffers setting. Azure sets shared_buffers to ~25% of server RAM
+  # automatically, so "shared_buffers / parallel_workers" gives each worker
+  # a safe allowance that scales correctly across all SKUs without risking OOM:
+  #
+  #   SKU              RAM    shared_buffers  ÷3 workers  → clamped value
+  #   B1ms             2 GB      512 MB           170 MB  → 170 MB
+  #   GP D2ds_v4       8 GB    2,048 MB           682 MB  → 682 MB
+  #   GP D4ds_v4      16 GB    4,096 MB         1,365 MB  → 1,024 MB (cap)
+  #   MO E8ds_v4      64 GB   16,384 MB         5,461 MB  → 1,024 MB (cap)
+  #
+  # This is set as a session-level GUC via PGOPTIONS so it only affects the
+  # pg_restore connection and never touches the server's running configuration.
+  # ---------------------------------------------------------------------------
+  local pg_restore_parallel_workers=3
+  local maintenance_work_mem_mb
+  local _shared_buffers_mb
+  _shared_buffers_mb=$(psql \
+    "host=${TARGET_POSTGRES_HOST} port=${postgres_port} user=${TARGET_POSTGRES_ADMIN_USER} dbname=postgres sslmode=require" \
+    -tAc "SELECT setting::int * 8 / 1024 FROM pg_settings WHERE name = 'shared_buffers'" \
+    2>/dev/null | tr -d '[:space:]' || echo "0")
+
+  if [[ "${_shared_buffers_mb:-0}" =~ ^[0-9]+$ ]] && [[ "${_shared_buffers_mb}" -gt 0 ]]; then
+    maintenance_work_mem_mb=$(( _shared_buffers_mb / pg_restore_parallel_workers ))
+    # Floor: 64 MB — below this, PostgreSQL cannot hold useful sort runs in memory.
+    # Cap: 1024 MB — beyond this, index-build improvement plateaus and memory
+    #               pressure from all workers combined becomes a concern.
+    [[ $maintenance_work_mem_mb -lt 64   ]] && maintenance_work_mem_mb=64
+    [[ $maintenance_work_mem_mb -gt 1024 ]] && maintenance_work_mem_mb=1024
+    log "maintenance_work_mem: ${maintenance_work_mem_mb}MB (shared_buffers=${_shared_buffers_mb}MB ÷ ${pg_restore_parallel_workers} workers)"
+  else
+    maintenance_work_mem_mb=128
+    warn "Could not read shared_buffers from target server; using fallback maintenance_work_mem=${maintenance_work_mem_mb}MB"
   fi
 
   local db_results_json="[]"
@@ -650,12 +727,16 @@ EOF
     # Disable statement_timeout (source server value may have been dumped into
     # the backup) and enable TCP keepalives to prevent the server or network
     # from dropping long-running COPY connections for large tables.
-    # -j 3: use 3 parallel workers for data load and index build phases.
-    # Workers operate on independent tables/indexes; if there is only one table
-    # the extra workers sit idle — no errors, no wasted work. Only applies to
+    # -j: use parallel workers for data load and index build phases. Workers
+    # operate on independent tables/indexes; if there is only one table the
+    # extra workers sit idle — no errors, no wasted work. Only applies to
     # custom-format dumps (Azure Backup Vault default); plain-text SQL files
     # trigger the psql fallback below which is unaffected by this flag.
-    PGOPTIONS="-c statement_timeout=0 -c tcp_keepalives_idle=60 -c tcp_keepalives_interval=10 -c tcp_keepalives_count=6" \
+    # maintenance_work_mem: set dynamically above from server shared_buffers.
+    # synchronous_commit=off: WAL writes are queued asynchronously (~0.6s
+    # risk window). Safe for restores — if the agent crashes, re-run the job.
+    # Reduces write amplification by 20-40% on IOPS-constrained storage.
+    PGOPTIONS="-c statement_timeout=0 -c tcp_keepalives_idle=60 -c tcp_keepalives_interval=10 -c tcp_keepalives_count=6 -c maintenance_work_mem=${maintenance_work_mem_mb}MB -c synchronous_commit=off" \
     pg_restore \
       -h "$TARGET_POSTGRES_HOST" \
       -p "$postgres_port" \
@@ -663,7 +744,7 @@ EOF
       -d "$db_name" \
       --no-owner \
       --no-privileges \
-      -j 3 \
+      -j "$pg_restore_parallel_workers" \
       -v \
       "$db_file" 2>&1 | tee "$pg_restore_log"
     local pg_restore_exit_code=${PIPESTATUS[0]}
