@@ -142,6 +142,7 @@ parameters:
 
 variables:
   - group: cnp-backup-vault-restore-secrets
+
 stages:
   # ---------------------------------------------------------------------------
   # Stage 1: Provision

@@ -139,6 +139,8 @@ parameters:
   - name: targetSku
     type: string
     default: 'none'
+
+variables:
   - ${{ if eq(parameters.environment, 'live') }}:
     - template: azure-pipeline-variables/live.yml
   - ${{ else }}:
