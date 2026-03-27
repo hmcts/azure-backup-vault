@@ -18,6 +18,7 @@ This document captures the Azure-documented support limitations for vaulted back
 | R5 | No item-level recovery (single database restore) | 🟡 Low | Architectural constraint, by design |
 | R6 | Role creation errors during restore | ✅ Handled | Proactively cleaned + error filter safety net |
 | R11 | Azure-generated `_tablespace.sql` / `_schema.sql` not restorable on Flexible Server | ✅ Handled | Detected and logged; not restored |
+| R12 | Vault association is tracked by datasource ARM resource ID, not backup instance name | 🟠 Medium | Operational cleanup required before reusing a server name |
 | R7 | Backup not supported on replicas | ✅ Not applicable | We configure backup on primary only |
 | R8 | No archive tier support | ✅ Not applicable | We use standard vault tier |
 | R9 | Full backups only (no incremental/differential) | ℹ️ Informational | Accepted — impacts RTO for large databases |
@@ -143,6 +144,41 @@ The unmodified `roles.sql.raw` is preserved in `restore-output/` for post-restor
 
 ---
 
+### R12 — Vault Association Is Tracked by Datasource ARM Resource ID, Not Backup Instance Name 🟠
+
+**Observed Azure behaviour:**
+When a protected PostgreSQL Flexible Server is deleted, the backup instance can remain in `SoftDeleted` state inside the vault. If a new PostgreSQL Flexible Server is later created with the **same ARM resource ID** — which happens when the same subscription, resource group, resource type, and server name are reused — Azure Backup still treats it as the same datasource.
+
+That means all of the following are **not** sufficient to break the association:
+- Restoring from a different source server
+- Restoring from a different recovery point
+- Creating a new backup instance name such as `-v2`
+- Deleting and recreating the PostgreSQL server if the server name stays the same
+
+For PostgreSQL Flexible Server, the datasource identity the vault tracks is effectively the server ARM resource ID:
+
+`/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.DBforPostgreSQL/flexibleServers/<server-name>`
+
+If that ID is reused while the prior backup instance is still `SoftDeleted`, registration fails with errors such as:
+
+> *"Datasource is already associated with the backup instance <name> in the Backup vault ... with the protection status as SoftDeleted."*
+
+**Risk to our solution:**
+This is easy to hit during restore testing and repeated sandbox rebuilds, because engineers naturally reuse the same restore target name. The failure is non-obvious from Terraform alone: changing `backup_instance_name` does not help because the vault is blocking the datasource association, not the friendly name.
+
+**Impact:**
+- Terraform backup-instance registration fails even though the Postgres server has been deleted and recreated successfully.
+- Operators can lose time debugging RBAC, policy, or naming issues that are not actually the cause.
+- Repeated test runs against the same restore target name require manual vault cleanup between runs.
+
+**Mitigation recommendations:**
+1. Before reusing a restore target server name, check whether the old backup instance is still `SoftDeleted` in the vault.
+2. Purge or recover the soft-deleted backup instance before attempting to protect a recreated server with the same name.
+3. For short-lived restore tests, prefer a unique server name per run to guarantee a new datasource ARM resource ID.
+4. Document clearly that backup instance name changes alone do not avoid this issue.
+
+---
+
 ### R7 — Backup Not Supported on Replicas ✅ Not Applicable
 
 **Azure documentation:**
@@ -217,4 +253,5 @@ When onboarding a new PostgreSQL Flexible Server to vault backup, confirm:
 - [ ] Backup policy is configured with a **single** weekly trigger
 - [ ] No application tables use `BYTEA` columns with rows exceeding 500 MB
 - [ ] Azure Monitor alert exists on vault backup job health for this server
+- [ ] If reusing a previous restore target name, confirm no soft-deleted backup instance still exists for that datasource in the vault
 - [ ] The restore pipeline has been run at least once successfully against a recovery point from this server

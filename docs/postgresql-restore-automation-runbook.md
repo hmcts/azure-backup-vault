@@ -86,6 +86,26 @@ Or in the portal: **Backup vault → Backup instances** (left nav) — the **Nam
 
 If both `backupInstanceName` and `backupInstanceFriendlyNameFilter` are set, `backupInstanceName` takes precedence.
 
+### Important: Datasource Identity and Soft-Deleted Backup Instances
+
+Azure Backup does **not** treat a recreated PostgreSQL Flexible Server with the same name as a brand-new datasource. The vault tracks the protected datasource by the PostgreSQL server ARM resource ID:
+
+`/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.DBforPostgreSQL/flexibleServers/<server-name>`
+
+If a server is deleted and recreated with the same subscription, resource group, and server name, the ARM resource ID is reused. If the previous backup instance for that datasource is still `SoftDeleted` in the vault, a new registration attempt fails even if:
+- the restore came from a different source server
+- a different recovery point was used
+- a different backup instance name was supplied
+
+Typical vault error:
+
+> `Datasource is already associated with the backup instance <name> ... with the protection status as SoftDeleted.`
+
+Operational guidance:
+1. Before protecting a recreated restore target, check the vault for a soft-deleted backup instance for the same server name.
+2. Purge or recover that soft-deleted backup instance before retrying protection.
+3. For repeated test runs, prefer a unique restore target server name each time to avoid reusing the same datasource ARM resource ID.
+
 ### Recovery point selection (`recoveryPointId` / `recoveryPointTimeUtc`)
 
 | Scenario | What to supply |
