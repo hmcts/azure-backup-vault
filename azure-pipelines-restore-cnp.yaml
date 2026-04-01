@@ -502,8 +502,20 @@ stages:
               artifactName: restore-output
               downloadPath: $(Pipeline.Workspace)
 
-          - displayName: Print restore summary
-            bash: |
+          - bash: |
+              set -euo pipefail
+
+              if ! command -v jq >/dev/null 2>&1; then
+                echo "Installing jq"
+                sudo apt-get update -y -q
+                sudo apt-get install -y -q jq
+              fi
+
+              METRICS_FILE=$(find "$(Pipeline.Workspace)" -type f -name "restore-metrics.json" | head -n1 || true)
+
+              echo "============================================================"
+              echo " Stage 2 Restore Summary"
+              echo "============================================================"
               set -euo pipefail
 
               if ! command -v jq >/dev/null 2>&1; then
@@ -568,6 +580,7 @@ stages:
               echo "targetStorageContainer: ${STORAGE_CONTAINER}"
               echo "walTuningApplied: ${WAL_MODIFIED}"
               echo "metricsFile: ${METRICS_FILE}"
+            displayName: Print restore summary
             env:
               RESTORED_SERVER_FQDN: $(restoredServerFqdn)
               RESTORED_SERVER_NAME: ${{ parameters.restoredServerName }}
