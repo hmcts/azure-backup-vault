@@ -94,13 +94,13 @@ parameters:
   # preview, then exits without modifying any Azure resource or database.
   # All three restoreMode values support dryRun=true:
   #   all          → discovers vault instances, recovery points, and blobs
-              if [[ -z "${METRICS_FILE}" ]]; then
-                 echo "ERROR: Restore metrics file not found. Restore may have failed or not produced output."
-                 exit 1
-              fi
-      - all
-      - vault-only
-      - database-only
+    - name: restoreMode
+      type: string
+      default: all
+      values:
+        - all
+        - vault-only
+        - database-only
   # Required when restoreMode=database-only (supply the pre-existing blob
   # container that holds the backup files). Ignored for all other modes.
   # Must be provided even when dryRun=true so blob discovery can run.
