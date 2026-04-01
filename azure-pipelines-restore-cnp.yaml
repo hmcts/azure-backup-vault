@@ -59,15 +59,14 @@ parameters:
   - name: backupInstanceName
     type: string
     default: 'none'
+  - name: backupInstanceFriendlyNameFilter
+    type: string
+    default: 'none'
   # Override: regex/substring matched case-insensitively against backup instance
   # friendlyName (the default naming convention is "${serverName}-backup-instance").
   # Leave as 'none' to auto-match on sourceServerName (recommended).
   # Only needed if you want a different match pattern than the server name.
   # Ignored for restoreMode=database-only.
-      - job: RestoreSummary
-        displayName: Output restore summary
-        dependsOn: TriggerAndTrackRestore
-        condition: succeeded()
   # available recovery point (recommended default).
   # Provide a specific ID to pin to an exact point. Ignored for restoreMode=database-only.
   - name: recoveryPointId
@@ -94,13 +93,18 @@ parameters:
   # preview, then exits without modifying any Azure resource or database.
   # All three restoreMode values support dryRun=true:
   #   all          → discovers vault instances, recovery points, and blobs
-    - name: restoreMode
-      type: string
-      default: all
-      values:
-        - all
-        - vault-only
-        - database-only
+  #   vault-only   → discovers vault instances and recovery points only
+  #   database-only → discovers blobs in existingRestoreContainer only
+  - name: dryRun
+    type: boolean
+    default: true
+  - name: restoreMode
+    type: string
+    default: all
+    values:
+      - all
+      - vault-only
+      - database-only
   # Required when restoreMode=database-only (supply the pre-existing blob
   # container that holds the backup files). Ignored for all other modes.
   # Must be provided even when dryRun=true so blob discovery can run.
@@ -498,7 +502,8 @@ stages:
               artifactName: restore-output
               downloadPath: $(Pipeline.Workspace)
 
-          - bash: |
+          - displayName: Print restore summary
+            bash: |
               set -euo pipefail
 
               if ! command -v jq >/dev/null 2>&1; then
@@ -563,7 +568,6 @@ stages:
               echo "targetStorageContainer: ${STORAGE_CONTAINER}"
               echo "walTuningApplied: ${WAL_MODIFIED}"
               echo "metricsFile: ${METRICS_FILE}"
-            displayName: Print restore summary
             env:
               RESTORED_SERVER_FQDN: $(restoredServerFqdn)
               RESTORED_SERVER_NAME: ${{ parameters.restoredServerName }}
