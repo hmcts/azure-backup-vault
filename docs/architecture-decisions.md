@@ -300,3 +300,34 @@ Schema is already fully embedded in each `*_database_*.sql` dump. Microsoft expl
 
 **Rationale for logging rather than silently skipping:**
 Explicit log output (`NOTE: Azure Backup generated file(s) present in container but intentionally NOT restored`) prevents the presence of these blobs from appearing as a defect or omission during post-restore review of pipeline logs.
+
+---
+
+## ADR-014: Restore pipeline agent resources can be increased to improve restore speed and stability
+
+**Date:** 2026-03-31
+**Status:** Accepted
+
+**Context:**
+The database restore phase runs from the Azure DevOps agent pod, not from the PostgreSQL server itself. The agent is responsible for downloading blobs, maintaining the client connection, running `pg_restore -j 3`, streaming verbose output, and sustaining the restore session for long-running COPY and index-build phases.
+
+With low agent limits, the restore client can become the bottleneck or fail independently of the target server. Memory pressure increases with parallel `pg_restore` workers, while low CPU increases client-side contention, throttling, and longer wall-clock execution. These effects are most visible on long restores where the job must stay healthy for tens of minutes or hours.
+
+Empirical testing showed that increasing the agent from a lower resource profile (`1` vCPU / `2Gi` memory) to a higher one (`2` vCPU / `4Gi` memory) materially improved restore reliability and contributed to faster end-to-end restore times when combined with the existing server-side tuning.
+
+**Decision:**
+Agent CPU and memory are treated as tunable restore controls. Where restore duration or client-side stability becomes a concern, the Azure DevOps agent resources can be increased to give `pg_restore` more headroom for parallel workers, blob download, connection handling, and long-running execution.
+
+This is an operational scaling lever rather than a hard requirement for every restore. The appropriate agent profile depends on restore size, restore duration, and the degree of parallelism used.
+
+**Rationale:**
+- `pg_restore -j 3` creates concurrent client-side worker processes. Increasing agent memory reduces the risk of OOM kills or unstable behavior during large restores.
+- More agent CPU reduces client-side throttling during blob download, TLS/network processing, worker coordination, and verbose log streaming.
+- Long-running restore jobs are sensitive to resource starvation. Extra headroom improves operational stability even when the dominant bottleneck is server-side index rebuild time.
+- Agent sizing and server sizing solve different problems: the PostgreSQL server SKU determines how quickly data and indexes are written, while the agent size determines whether the restore client can sustain parallel restore work safely and efficiently.
+- Observed improvements after increasing agent resources support documenting this as a deliberate tuning option rather than incidental behavior.
+
+**Consequences:**
+- Restore documentation should explicitly state that agent resources can be increased to improve both restore throughput and stability when needed.
+- Future performance tuning must consider both dimensions separately: agent capacity for safe client execution, and server SKU / storage IOPS for database-side throughput.
+- Any future increase in `pg_restore` parallelism must be evaluated against agent memory and CPU limits before adoption.

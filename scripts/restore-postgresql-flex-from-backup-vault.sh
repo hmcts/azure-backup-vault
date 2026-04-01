@@ -150,6 +150,57 @@ roles_restore_has_unexpected_errors() {
   return 1
 }
 
+# ---------------------------------------------------------------------------
+# calculate_pg_restore_workers
+#
+# Derives a safe pg_restore -j worker count from the agent's cgroup memory
+# limit. Each worker consumes roughly 1 GB of agent memory (network buffers,
+# sort scratch, pg_restore overhead). 1 GB is reserved for the pg_restore
+# main process and OS overhead, so:
+#
+#   workers = floor((cgroup_limit_gb - 1) / 1)  clamped to [1, 4]
+#
+# The upper cap of 4 reflects the point where IOPS on the PostgreSQL server
+# becomes the bottleneck and additional workers stop improving throughput.
+#
+# If the cgroup limit cannot be read (non-containerised or unlimited), the
+# function falls back to 3 — the previous hardcoded default that is safe
+# on the standard 4Gi agent profile.
+#
+# Cgroup v2 (/sys/fs/cgroup/memory.max) is tried first; cgroup v1
+# (/sys/fs/cgroup/memory/memory.limit_in_bytes) is used as a fallback.
+# ---------------------------------------------------------------------------
+calculate_pg_restore_workers() {
+  local cg_mem_bytes
+  local cg_mem_gb
+  local workers
+
+  # cgroups v2 (Kubernetes default on modern nodes)
+  if [[ -r /sys/fs/cgroup/memory.max ]]; then
+    cg_mem_bytes=$(cat /sys/fs/cgroup/memory.max)
+  # cgroups v1 fallback
+  elif [[ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]]; then
+    cg_mem_bytes=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
+  fi
+
+  # If unset, unlimited, or not a number — use safe fallback
+  if [[ -z "${cg_mem_bytes:-}" ]] || [[ "$cg_mem_bytes" == "max" ]] || ! [[ "$cg_mem_bytes" =~ ^[0-9]+$ ]]; then
+    warn "Could not read cgroup memory limit; using fallback pg_restore worker count of 3"
+    echo 3
+    return 0
+  fi
+
+  cg_mem_gb=$(( cg_mem_bytes / 1024 / 1024 / 1024 ))
+  workers=$(( cg_mem_gb - 1 ))
+
+  # Floor: 1 worker minimum (always safe, always makes progress)
+  # Cap:   4 workers maximum (IOPS becomes the limiting factor beyond this)
+  [[ $workers -lt 1 ]] && workers=1
+  [[ $workers -gt 4 ]] && workers=4
+
+  echo "$workers"
+}
+
 main() {
   require_env "VAULT_RESOURCE_GROUP"
   require_env "VAULT_NAME"
@@ -640,21 +691,38 @@ EOF
   fi
 
   # ---------------------------------------------------------------------------
+  # Determine pg_restore worker count from the agent's cgroup memory limit.
+  # Each worker uses ~1 GB of agent memory; 1 GB is reserved for overhead.
+  # The count is clamped to [1, 4] — beyond 4 workers, server-side IOPS is
+  # the bottleneck and additional workers do not improve restore throughput.
+  #
+  #   Agent memory  Workers  Notes
+  #   2Gi           1        Minimum; safe on constrained agents
+  #   4Gi           3        Standard profile (previous hardcoded default)
+  #   6Gi / 8Gi     4        Cap — IOPS-bound beyond this
+  #
+  # Increasing the agent memory limit (e.g. via the Kubernetes resource spec)
+  # automatically raises the worker count up to the cap — no code change is
+  # needed. Falls back to 3 if the cgroup limit cannot be read.
+  # ---------------------------------------------------------------------------
+  local pg_restore_parallel_workers
+  pg_restore_parallel_workers=$(calculate_pg_restore_workers)
+  log "pg_restore parallelism: -j ${pg_restore_parallel_workers} workers (derived from agent cgroup memory limit)"
+  # ---------------------------------------------------------------------------
   # Determine maintenance_work_mem dynamically from the target server's
   # shared_buffers setting. Azure sets shared_buffers to ~25% of server RAM
   # automatically, so "shared_buffers / parallel_workers" gives each worker
   # a safe allowance that scales correctly across all SKUs without risking OOM:
   #
-  #   SKU              RAM    shared_buffers  ÷3 workers  → clamped value
-  #   B1ms             2 GB      512 MB           170 MB  → 170 MB
-  #   GP D2ds_v4       8 GB    2,048 MB           682 MB  → 682 MB
-  #   GP D4ds_v4      16 GB    4,096 MB         1,365 MB  → 1,024 MB (cap)
-  #   MO E8ds_v4      64 GB   16,384 MB         5,461 MB  → 1,024 MB (cap)
+  #   SKU              RAM    shared_buffers  ÷N workers  → clamped value
+  #   B1ms             2 GB      512 MB       ÷1 → 512 MB → 512 MB
+  #   GP D2ds_v4       8 GB    2,048 MB       ÷3 → 682 MB → 682 MB
+  #   GP D4ds_v4      16 GB    4,096 MB       ÷4 → 1,024 MB (cap)
+  #   MO E8ds_v4      64 GB   16,384 MB       ÷4 → 1,024 MB (cap)
   #
   # This is set as a session-level GUC via PGOPTIONS so it only affects the
   # pg_restore connection and never touches the server's running configuration.
   # ---------------------------------------------------------------------------
-  local pg_restore_parallel_workers=3
   local maintenance_work_mem_mb
   local _shared_buffers_mb
   _shared_buffers_mb=$(psql \
