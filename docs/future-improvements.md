@@ -99,3 +99,54 @@ production and synthetic alike.
 
 **Note:** `wal_compression` affects only the restored server during the restore window; it has no
 impact on the source server or on the vault backup artefacts.
+
+---
+
+## Script Refactoring to Modular Architecture
+
+**Priority:** High
+**Context:** The restore script (`restore-postgresql-flex-from-backup-vault.sh`) has grown to 1043 lines and now includes WAL tuning logic, dynamic worker calculation, metrics JSON building, and role restoration. The monolithic structure makes it difficult to test, debug, and extend individual components. This refactoring was identified during WAL tuning implementation (ADR-016).
+
+**Proposed improvement:**
+Extract into library modules in a `lib/` subdirectory:
+- `lib/common.sh` — Shared helper functions, logging, validation, error handling (~100 lines)
+- `lib/azure-discovery.sh` — Vault instance and recovery-point discovery (~150 lines)
+- `lib/database-restore.sh` — Core database restoration loop and pg_restore orchestration (~200 lines)
+- `lib/metrics.sh` — Metrics JSON building and output (~100 lines)
+- `lib/wal-tuning.sh` — WAL setting get/set functions and toggle logic (~80 lines, reusable)
+- `lib/roles-restore.sh` — Role and permission restoration (~80 lines)
+
+**Benefits:**
+- Each module 80-200 lines, independently testable
+- Enables cleaner implementation of phased restore feature (see next item)
+- Reduces cognitive load for future maintainers
+- Allows reuse of `wal-tuning.sh` functions in other restore scenarios
+
+**Timing:** After WAL tuning performance is validated on real 600GB+ restores; implement before adding phased restore capability.
+
+---
+
+## Phased Restore Capability (`--section` parameter)
+
+**Priority:** High (planned for next sprint after refactoring)
+**Context:** Currently, if a restore fails during the indexing phase (post-data) after 5+ hours of data loading, the entire operation must restart. For large databases (600GB+), this is costly.
+
+**Proposed improvement:**
+Add support for PostgreSQL's `--section` parameter in `pg_restore` to enable separate restoration of:
+- `pre-data` — schema (tables, sequences, functions, types) without data
+- `data` — COPY statements for table data only
+- `post-data` — indexes, constraints, triggers, views
+
+Allow pipeline parameter `RESTORE_SECTION=data|post-data|all` (default: `all`) to:
+1. Run `pg_restore --section pre-data` once
+2. Run `pg_restore --section data` once (5+ hours for large databases)
+3. Run `pg_restore --section post-data` independently if needed (can retry without reloading data)
+
+If the post-data phase fails due to index build timeout or constraint violation, retry only that section (~1-2 hours) instead of restarting from scratch.
+
+**Benefits:**
+- 1-1.5 hour savings if indexing fails on large restores
+- Enables faster iteration for debugging constraint/trigger issues
+- Cleaner separation of concerns (schema → data → indexes)
+
+**Requires:** Refactored script structure (modular) to cleanly separate section-specific logic. Implement only after script refactoring is complete. Will require a separate ADR detailing failure scenarios and retry logic.

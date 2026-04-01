@@ -495,6 +495,94 @@ stages:
               ArtifactName: restore-output
               publishLocation: Container
 
+      - job: RestoreSummary
+        displayName: Output restore summary
+        dependsOn: TriggerAndTrackRestore
+        condition: succeeded()
+        pool:
+          name: ${{ parameters.agentPool }}
+        steps:
+          - task: DownloadBuildArtifacts@0
+            displayName: Download restore output artifact
+            inputs:
+              buildType: current
+              downloadType: single
+              artifactName: restore-output
+              downloadPath: $(Pipeline.Workspace)
+
+          - bash: |
+              set -euo pipefail
+
+              if ! command -v jq >/dev/null 2>&1; then
+                echo "Installing jq"
+                sudo apt-get update -y -q
+                sudo apt-get install -y -q jq
+              fi
+
+              METRICS_FILE=$(find "$(Pipeline.Workspace)" -type f -name "restore-metrics.json" | head -n1 || true)
+
+              echo "============================================================"
+              echo " Stage 2 Restore Summary"
+              echo "============================================================"
+
+              if [[ -z "${METRICS_FILE}" ]]; then
+                 echo "ERROR: Restore metrics file not found. Restore may have failed or not produced output."
+                 exit 1
+              fi
+
+              SERVER_FQDN=$(jq -r '.targetPostgresHost // empty' "${METRICS_FILE}")
+              if [[ -n "${SERVER_FQDN}" ]]; then
+                SERVER_NAME="${SERVER_FQDN%%.*}"
+              else
+                SERVER_NAME="${RESTORED_SERVER_NAME}"
+                SERVER_FQDN="${RESTORED_SERVER_FQDN}"
+              fi
+
+              RP_ID=$(jq -r '.recoveryPointId // "n/a"' "${METRICS_FILE}")
+              RP_TIME_UTC=$(jq -r '.recoveryPointTimeUtc // "n/a"' "${METRICS_FILE}")
+              if [[ "${RP_TIME_UTC}" != "n/a" && "${RP_TIME_UTC}" != "unknown" ]]; then
+                RP_DATE=$(date -u -d "${RP_TIME_UTC}" +"%Y-%m-%d" 2>/dev/null || echo "n/a")
+                RP_TIME=$(date -u -d "${RP_TIME_UTC}" +"%H:%M:%S" 2>/dev/null || echo "n/a")
+              else
+                RP_DATE="n/a"
+                RP_TIME="n/a"
+              fi
+
+              VAULT_STATUS=$(jq -r '.vaultRestoreJobStatus // "n/a"' "${METRICS_FILE}")
+              VAULT_JOB_ID=$(jq -r '.vaultRestoreJobId // "n/a"' "${METRICS_FILE}")
+              VAULT_DURATION=$(jq -r '.vaultPhaseDurationMinutes // "n/a"' "${METRICS_FILE}")
+              DB_DURATION=$(jq -r '.databasePhaseDurationMinutes // "n/a"' "${METRICS_FILE}")
+              DB_COUNT=$(jq -r '(.databaseRestores // []) | length' "${METRICS_FILE}")
+              STORAGE_ACCOUNT=$(jq -r '.targetStorageAccount // "n/a"' "${METRICS_FILE}")
+              STORAGE_CONTAINER=$(jq -r '.targetStorageContainer // "n/a"' "${METRICS_FILE}")
+              RESTORE_SCOPE=$(jq -r '.restoreScope // env.RESTORE_MODE // "n/a"' "${METRICS_FILE}")
+              WAL_MODIFIED=$(jq -r '.walTuning.settingsModified // "n/a"' "${METRICS_FILE}")
+
+              echo "serverName: ${SERVER_NAME}"
+              echo "serverFqdn: ${SERVER_FQDN}"
+              echo "restorePointId: ${RP_ID}"
+              echo "restorePointDate (UTC): ${RP_DATE}"
+              echo "restorePointTime (UTC): ${RP_TIME}"
+              echo ""
+              echo "Additional restore information:"
+              echo "restoreMode: ${RESTORE_SCOPE}"
+              echo "vaultRestoreJobStatus: ${VAULT_STATUS}"
+              echo "vaultRestoreJobId: ${VAULT_JOB_ID}"
+              echo "vaultPhaseDuration: ${VAULT_DURATION}"
+              echo "databasePhaseDuration: ${DB_DURATION}"
+              echo "databaseCountRestored: ${DB_COUNT}"
+              echo "targetStorageAccount: ${STORAGE_ACCOUNT}"
+              echo "targetStorageContainer: ${STORAGE_CONTAINER}"
+              echo "walTuningApplied: ${WAL_MODIFIED}"
+              echo "metricsFile: ${METRICS_FILE}"
+            displayName: Print restore summary
+            env:
+              RESTORED_SERVER_FQDN: $(restoredServerFqdn)
+              RESTORED_SERVER_NAME: ${{ parameters.restoredServerName }}
+              REQUESTED_RECOVERY_POINT_ID: ${{ parameters.recoveryPointId }}
+              REQUESTED_RECOVERY_POINT_TIME_UTC: ${{ parameters.recoveryPointTimeUtc }}
+              RESTORE_MODE: ${{ parameters.restoreMode }}
+
   # ---------------------------------------------------------------------------
   # Stage 3: Validate
   # Connects to the restored Postgres server and enumerates all user databases,
