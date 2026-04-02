@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# Always initialize to avoid unbound variable errors with set -u
+wal_settings_modified=false
+
 log() {
   echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] $*"
 }
