@@ -1,4 +1,21 @@
+
 # Future Improvements
+
+## Script Robustness and Error Handling
+
+**Priority:** High (continuous improvement)
+**Context:** Recent large-scale restores and pipeline runs surfaced the importance of robust Bash scripting practices. Uninitialized variables (e.g., `wal_settings_modified`) and missing error checks can cause runtime failures, especially with `set -euo pipefail` enabled.
+
+**Recent improvements:**
+- All variables in the restore script are now explicitly initialized before use.
+- Error handling is hardened throughout the script, with clear logging and fail-fast behavior for unexpected conditions.
+- The script is regularly reviewed for Bash best practices and defensive coding.
+
+**Proposed improvement:**
+- Continue to review and refactor the script for clarity, maintainability, and resilience.
+- Consider modularizing the script (see below) to enable easier testing and targeted improvements.
+- Encourage all contributors to follow strict Bash best practices: always initialize variables, use `set -euo pipefail`, and handle all error cases explicitly.
+
 
 ## Backup Vault Monitoring and Alerting
 

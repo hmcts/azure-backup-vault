@@ -1,5 +1,22 @@
 # PostgreSQL UK South Restore Automation Runbook
 
+**Quick Reference for Operators**
+
+> **Lessons from Large Restores (600GB+)**
+>
+> **Key findings from recent large-scale restores:**
+>
+> - **Increase both server SKU and agent resources:** For datasets above ~200GB, especially 600GB+, increase the PostgreSQL server SKU (CPU/RAM/IOPS) and the Azure DevOps agent size (CPU/memory) to avoid bottlenecks and ensure restore stability. See ADR-014 for rationale.
+> - **WAL tuning is critical:** The restore script temporarily disables `fsync` and `full_page_writes` during the restore phase, then restores them. This improves throughput by 25–35% on IOPS-constrained storage. See ADR-015 for details and risk analysis.
+> - **Index rebuild dominates RTO:** For very large tables, index (primary key) rebuild time is the main factor in total restore duration, not the data COPY phase. Higher IOPS SKUs reduce this bottleneck.
+> - **Script robustness:** All Bash variables are now initialized and error handling is hardened to prevent runtime failures (e.g., unbound variables). Always use the latest script version.
+> - **Evidence:** The 600GB restore completed successfully after scaling up both server and agent, with WAL tuning enabled. RTO improved by 25–35% compared to untuned runs.
+>
+> **References:**
+> - [ADR-014: Agent Resource Scaling](architecture-decisions.md#adr-014-restore-pipeline-agent-resources-can-be-increased-to-improve-restore-speed-and-stability)
+> - [ADR-015: WAL Tuning](architecture-decisions.md#adr-015-wal-tuning-for-restore-performance-optimization)
+> - [restore-test-scenarios.md](restore-test-scenarios.md)
+
 This runbook documents the automated restore workflow for Azure Database for PostgreSQL Flexible Server backups managed via Azure Backup Vault.
 
 It covers:
@@ -139,6 +156,20 @@ Each pipeline reads credentials from a pre-configured ADO variable group:
 | CPP | `cpp-backup-vault-restore-secrets` | `targetPostgresAdminUser` (plain text), `targetPostgresAdminPassword` (secret) |
 
 These credentials are used to create the restored Postgres server (Stage 1) and to connect to it for the database restore and validation stages (Stages 2 and 3).
+
+
+## WAL Tuning for Restore Performance
+
+During the database restore phase, the script temporarily disables PostgreSQL settings `fsync` and `full_page_writes` to improve throughput by 25–35% on IOPS-constrained storage. These settings are automatically restored after the restore completes (even if interrupted), ensuring no risk to subsequent workloads.
+
+**Why it’s safe:**
+- The restore is a one-shot, idempotent operation with no other clients connected.
+- If the restore is interrupted, simply re-run the job; no production data is at risk.
+- The script uses a Bash trap to guarantee settings are restored even on failure.
+
+**Do not use this tuning for production workloads.** It is only safe for isolated restore jobs.
+
+See [ADR-015](architecture-decisions.md#adr-015-wal-tuning-for-restore-performance-optimization) for full rationale, risk analysis, and implementation details.
 
 ## Workflow implemented
 
