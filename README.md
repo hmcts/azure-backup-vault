@@ -22,8 +22,14 @@ azure-backup-vault/
 ├── environments/
 │   ├── prod/                   # Production environment (cnp.tfvars, cpp.tfvars)
 │   └── sbox/                   # CNP sandbox environment (cnp.tfvars)
-├── azure-pipelines.yaml        # CNP pipeline (hmcts/PlatformOperations)
-├── azure-pipelines-cpp.yaml    # CPP pipeline (hmcts-cpp org)
+├── azure-pipelines.yaml        # CNP Terraform pipeline (hmcts/PlatformOperations)
+├── azure-pipelines-cpp.yaml    # CPP Terraform pipeline (hmcts-cpp org)
+├── azure-pipelines-restore-cnp.yaml # CNP restore automation pipeline
+├── azure-pipelines-restore-cpp.yaml # CPP restore automation pipeline
+├── scripts/
+│   └── restore-postgresql-flex-from-backup-vault.sh # Shared restore automation script
+├── docs/
+│   └── postgresql-restore-automation-runbook.md # Operational runbook and testing guidance
 ├── .terraform-version          # Terraform version constraint
 ├── CODEOWNERS                  # Code ownership rules
 └── README.md                   # This file
@@ -62,7 +68,7 @@ The CPP production environment contains the CPP backup vault configuration:
 The CNP production environment contains fully hardened backup vault configurations:
 
 - **Immutability**: Unlocked for initial deployment, can be locked after validation
-- **Cross-Region Restore**: Enabled for business continuity  
+- **Cross-Region Restore**: Enabled for business continuity
 - **Backup Policies**: All PostgreSQL policies enabled (CRIT4/5 and test)
 - **Extended Retention**: Enabled for MOJ compliance (P56D/P2M/P1Y)
 - **Redundancy**: GeoRedundant for cross-region disaster recovery
@@ -85,6 +91,37 @@ Deployments are carried out via Azure DevOps pipelines from this repo.
 
 - **CNP Pipeline**: https://dev.azure.com/hmcts/PlatformOperations/_build?definitionId=1181&_a=summary ([source](./azure-pipelines.yaml))
 - **CPP Pipeline**: To be registered in `https://dev.azure.com/hmcts-cpp/` ([source](./azure-pipelines-cpp.yaml))
+
+Restore automation entry points:
+
+- **CNP Restore Pipeline**: register in `https://dev.azure.com/hmcts/PlatformOperations` ([source](./azure-pipelines-restore-cnp.yaml))
+- **CPP Restore Pipeline**: register in `https://dev.azure.com/hmcts-cpp/` ([source](./azure-pipelines-restore-cpp.yaml))
+- **Runbook**: [PostgreSQL Restore Automation Runbook](./docs/postgresql-restore-automation-runbook.md)
+
+### Restore Operation Modes
+
+Both restore pipelines (`azure-pipelines-restore-cnp.yaml` / `azure-pipelines-restore-cpp.yaml`) expose two independent parameters that control what the run does:
+
+- **`restoreMode`** — controls which phases of the restore are executed
+- **`dryRun`** — when `true`, performs read-only discovery and prints a command preview without modifying any Azure resource or database; compatible with all three `restoreMode` values
+
+| `restoreMode` | `dryRun` | Vault restore | DB restore | Stage 3 validate | Notes |
+|---|---|---|---|---|---|
+| `all` | `false` | ✅ | ✅ | ✅ | Full end-to-end restore |
+| `all` | `true` | 🔍 discover only | 🔍 discover only | ⏭️ skipped | Previews both vault + DB commands |
+| `vault-only` | `false` | ✅ | ❌ | ❌ | Blobs land in storage; no Postgres server created |
+| `vault-only` | `true` | 🔍 discover only | ❌ | ⏭️ skipped | Previews vault restore commands only |
+| `database-only` | `false` | ❌ | ✅ | ✅ | Reuses `existingRestoreContainer`; skips vault |
+| `database-only` | `true` | ❌ | 🔍 discover only | ⏭️ skipped | Lists blobs in `existingRestoreContainer`; previews DB restore commands |
+
+**Key rules:**
+- `existingRestoreContainer` must be set (not `none`) when `restoreMode=database-only`, including for dry runs — blob discovery needs the container name.
+- Stage 3 (validate) is always skipped when `restoreMode=vault-only` (no database was restored) or `dryRun=true` (no server was provisioned).
+- `createPostgresServer` (Stage 1) is skipped for `vault-only` regardless of `dryRun`.
+
+See the [Operational Runbook](./docs/postgresql-restore-automation-runbook.md) for step-by-step usage guidance and full parameter reference.
+
+---
 
 ### Adding a New Backup Vault
 
