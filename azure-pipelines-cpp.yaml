@@ -19,7 +19,6 @@ parameters:
   - name: agentPool
     values:
       - MPD-ADO-AGENTS-01
-      - MDV-ADO-AGENTS-01
     default: "MPD-ADO-AGENTS-01"
   - name: action
     values:
@@ -27,20 +26,17 @@ parameters:
       - apply
     default: plan
   - name: env
-    displayName: "Environment (prod/sbox)"
+    displayName: "Environment"
     values:
       - prod
-      - sbox
     default: prod
   - name: platform
     values:
       - live
-      - nonlive
     default: "live"
   - name: environment
     values:
       - cpp-live
-      - cpp-nonlive
     default: "cpp-live"
   - name: targetResources
     default: null
