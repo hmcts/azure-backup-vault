@@ -9,9 +9,9 @@ backup_vaults = {
   "cpp-backup-vault" = {
     location                     = "uksouth"
     redundancy                   = "GeoRedundant"
-    immutability                 = "Unlocked"
-    cross_region_restore_enabled = true
-    soft_delete                  = "On"
+    immutability                 = "Locked"
+    cross_region_restore_enabled = false
+    soft_delete                  = "Off"
     retention_duration_in_days   = 30
 
     enable_postgresql_crit4_5_policy   = true
