@@ -15,7 +15,7 @@ backup_vaults = {
     retention_duration_in_days   = 30
 
     enable_postgresql_crit4_5_policy   = true
-    enable_postgresql_test_policy      = false
+    enable_postgresql_test_policy      = true
     crit4_5_enable_extended_retention  = true
     crit4_5_weekly_retention_duration  = "P56D"
     crit4_5_monthly_retention_duration = "P2M"
