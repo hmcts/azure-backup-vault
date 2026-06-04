@@ -12,10 +12,10 @@ parameters:
       - nonlive
   - name: agentPool
     type: string
-    default: MPD-ADO-AGENTS-01
+    default: ubuntu-ado-agents-mpd
     values:
-      - MPD-ADO-AGENTS-01
-      - MDV-ADO-AGENTS-01
+      - ubuntu-ado-agents-mpd
+      - ubuntu-ado-agents-mdv
   # Pre-provisioned by Terraform - the only permitted restore target for CPP.
   # Must match the storage account deployed by the azure-backup-vault Terraform module.
   # See docs/architecture-decisions.md ADR-002.
