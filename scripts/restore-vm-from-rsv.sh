@@ -8,10 +8,10 @@ set -euo pipefail
 # Self-service VM restore from Azure Recovery Services Vault (RSV).
 # Supports four restore methods mapped to BCDR failure scenarios:
 #
-#   method-c  Replace Existing (OriginalLocation, in-place)   — S2: VM non-bootable
-#   method-a  Create New VM   (AlternateLocation)             — S3: VM deleted
-#   method-b  Restore Managed Disks only (disk-only)          — S3, S4: DR drill
-#   method-d  Item-Level Recovery (ILR / file recovery)       — S1, S5: file/data loss
+#   replace-existing  Replace Existing (OriginalLocation, in-place)   — S2: VM non-bootable
+#   create-new-vm  Create New VM   (AlternateLocation)             — S3: VM deleted
+#   restore-disks-only  Restore Managed Disks only (disk-only)          — S3, S4: DR drill
+#   file-recovery  Item-Level Recovery (ILR / file recovery)       — S1, S5: file/data loss
 #
 # All inputs are provided as environment variables (passed from the pipeline).
 # See azure-pipelines-restore-vm-cnp.yaml / azure-pipelines-restore-vm-cpp.yaml.
@@ -21,7 +21,7 @@ set -euo pipefail
 #   VAULT_RESOURCE_GROUP          RSV resource group
 #   SOURCE_VM_NAME                Name of the VM to restore
 #   SOURCE_RESOURCE_GROUP         Resource group of the source VM
-#   RESTORE_METHOD                method-c | method-a | method-b | method-d
+#   RESTORE_METHOD                replace-existing | create-new-vm | restore-disks-only | file-recovery
 #   STAGING_STORAGE_ACCOUNT       Pre-provisioned storage account for disk staging
 #   STAGING_STORAGE_ACCOUNT_RG    Resource group of the staging storage account
 #   DRY_RUN                       true | false (default: true)
@@ -38,9 +38,9 @@ set -euo pipefail
 #   TARGET_RESOURCE_GROUP         Target RG for new VM; defaults to SOURCE_RESOURCE_GROUP
 #   TARGET_SUBSCRIPTION           Target subscription for cross-sub restore
 #   TARGET_VM_NAME                New VM name; default: auto-generated
-#   TARGET_VNET_NAME              Target VNet name (required for method-a)
-#   TARGET_SUBNET_NAME            Target subnet name (required for method-a)
-#   TARGET_VNET_RESOURCE_GROUP    Target VNet resource group (required for method-a)
+#   TARGET_VNET_NAME              Target VNet name (required for create-new-vm)
+#   TARGET_SUBNET_NAME            Target subnet name (required for create-new-vm)
+#   TARGET_VNET_RESOURCE_GROUP    Target VNet resource group (required for create-new-vm)
 #
 # Method B only (Restore Managed Disks):
 #   TARGET_RESOURCE_GROUP         Target RG for restored disks; defaults to SOURCE_RESOURCE_GROUP
@@ -250,7 +250,7 @@ restore_method_c() {
     log "       --restore-mode OriginalLocation"
     log "  4. az vm start     --name ${source_vm} -g ${source_rg} ${source_sub_flag}"
     log "[DRY RUN] No changes made."
-    write_metrics "method-c" "$source_vm" "$source_rg" "$selected_rp" "n/a" "n/a" "dry-run" "n/a" "n/a" "true"
+    write_metrics "replace-existing" "$source_vm" "$source_rg" "$selected_rp" "n/a" "n/a" "dry-run" "n/a" "n/a" "true"
     return 0
   fi
 
@@ -302,7 +302,7 @@ restore_method_c() {
   warn "Verify the restore is correct, then delete the old disk manually."
   warn "Also check for any queued Run Commands — the VM agent replays the last one on boot."
 
-  write_metrics "method-c" "$source_vm" "$source_rg" "$selected_rp" "n/a" "$job_id" "$job_status" "$start_time" "$end_time" "false"
+  write_metrics "replace-existing" "$source_vm" "$source_rg" "$selected_rp" "n/a" "$job_id" "$job_status" "$start_time" "$end_time" "false"
 }
 
 # ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ restore_method_a() {
     log "    --target-subnet-name ${target_subnet_name} \\"
     log "    --target-vnet-resource-group ${target_vnet_rg}"
     log "[DRY RUN] No changes made."
-    write_metrics "method-a" "$source_vm" "$source_rg" "$selected_rp" "n/a" "n/a" "dry-run" "n/a" "n/a" "true"
+    write_metrics "create-new-vm" "$source_vm" "$source_rg" "$selected_rp" "n/a" "n/a" "dry-run" "n/a" "n/a" "true"
     return 0
   fi
 
@@ -391,7 +391,6 @@ restore_method_a() {
     --target-vnet-name "$target_vnet_name" \
     --target-subnet-name "$target_subnet_name" \
     --target-vnet-resource-group "$target_vnet_rg" \
-    $source_sub_flag \
     -o json)
 
   job_id=$(echo "$restore_output" | jq -r '.name // empty')
@@ -407,7 +406,7 @@ restore_method_a() {
   warn "New VM will have a dynamic IP — apply static IP and RBAC assignments manually if required."
   warn "Extensions installed on the source VM are not carried over — reinstall if needed."
 
-  write_metrics "method-a" "$source_vm" "$source_rg" "$selected_rp" "n/a" "$job_id" "$job_status" "$start_time" "$end_time" "false"
+  write_metrics "create-new-vm" "$source_vm" "$source_rg" "$selected_rp" "n/a" "$job_id" "$job_status" "$start_time" "$end_time" "false"
 }
 
 # ---------------------------------------------------------------------------
@@ -451,9 +450,9 @@ restore_method_b() {
     log "    --storage-account ${staging_sa} \\"
     log "    --storage-account-resource-group ${staging_sa_rg} \\"
     log "    --restore-to-staging-storage-account true \\"
-    log "    --target-resource-group ${target_rg} ${target_sub_flag} ${source_sub_flag}"
+    log "    --target-resource-group ${target_rg} ${target_sub_flag}"
     log "[DRY RUN] No changes made."
-    write_metrics "method-b" "$source_vm" "$source_rg" "$selected_rp" "n/a" "n/a" "dry-run" "n/a" "n/a" "true"
+    write_metrics "restore-disks-only" "$source_vm" "$source_rg" "$selected_rp" "n/a" "n/a" "dry-run" "n/a" "n/a" "true"
     return 0
   fi
 
@@ -482,7 +481,6 @@ restore_method_b() {
     --restore-to-staging-storage-account true \
     --target-resource-group "$target_rg" \
     $target_sub_id_flag \
-    $source_sub_flag \
     -o json)
 
   job_id=$(echo "$restore_output" | jq -r '.name // empty')
@@ -499,7 +497,7 @@ restore_method_b() {
   warn "Delete the restored disks from ${target_rg} once verified — do not leave them running."
   warn "Clean up staging storage account blobs after use."
 
-  write_metrics "method-b" "$source_vm" "$source_rg" "$selected_rp" "n/a" "$job_id" "$job_status" "$start_time" "$end_time" "false"
+  write_metrics "restore-disks-only" "$source_vm" "$source_rg" "$selected_rp" "n/a" "$job_id" "$job_status" "$start_time" "$end_time" "false"
 }
 
 # ---------------------------------------------------------------------------
@@ -531,7 +529,7 @@ restore_method_d() {
     log "    --container-name ${source_vm} --item-name ${source_vm} \\"
     log "    --rp-name ${selected_rp}"
     log "[DRY RUN] No changes made."
-    write_metrics "method-d" "$source_vm" "$source_rg" "$selected_rp" "n/a" "n/a" "dry-run" "n/a" "n/a" "true"
+    write_metrics "file-recovery" "$source_vm" "$source_rg" "$selected_rp" "n/a" "n/a" "dry-run" "n/a" "n/a" "true"
     return 0
   fi
 
@@ -572,7 +570,7 @@ restore_method_d() {
   log "   Session expires automatically after 12 hours."
   log "============================================================"
 
-  write_metrics "method-d" "$source_vm" "$source_rg" "$selected_rp" "n/a" "ilr-session" "MountedForILR" \
+  write_metrics "file-recovery" "$source_vm" "$source_rg" "$selected_rp" "n/a" "ilr-session" "MountedForILR" \
     "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "n/a" "false"
 }
 
@@ -621,7 +619,7 @@ main() {
   # Method D does not use a staging storage account
   local staging_sa="${STAGING_STORAGE_ACCOUNT:-}"
   local staging_sa_rg="${STAGING_STORAGE_ACCOUNT_RG:-}"
-  if [[ "$restore_method" != "method-d" ]]; then
+  if [[ "$restore_method" != "file-recovery" ]]; then
     [[ -n "$staging_sa" ]] || fail "STAGING_STORAGE_ACCOUNT is required for ${restore_method}"
     [[ -n "$staging_sa_rg" ]] || fail "STAGING_STORAGE_ACCOUNT_RG is required for ${restore_method}"
   fi
@@ -687,7 +685,7 @@ main() {
   # Dispatch to method-specific restore function
   # ------------------------------------------------------------------
   case "$restore_method" in
-    method-c)
+    replace-existing)
       restore_method_c \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" "$source_sub_flag" \
@@ -695,10 +693,10 @@ main() {
         "$dry_run" "$timeout_minutes" "$poll_seconds"
       ;;
 
-    method-a)
-      [[ -n "$target_vnet_name" ]]   || fail "TARGET_VNET_NAME is required for method-a"
-      [[ -n "$target_subnet_name" ]] || fail "TARGET_SUBNET_NAME is required for method-a"
-      [[ -n "$target_vnet_rg" ]]     || fail "TARGET_VNET_RESOURCE_GROUP is required for method-a"
+    create-new-vm)
+      [[ -n "$target_vnet_name" ]]   || fail "TARGET_VNET_NAME is required for create-new-vm"
+      [[ -n "$target_subnet_name" ]] || fail "TARGET_SUBNET_NAME is required for create-new-vm"
+      [[ -n "$target_vnet_rg" ]]     || fail "TARGET_VNET_RESOURCE_GROUP is required for create-new-vm"
       restore_method_a \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" "$source_sub_flag" \
@@ -708,7 +706,7 @@ main() {
         "$dry_run" "$timeout_minutes" "$poll_seconds"
       ;;
 
-    method-b)
+    restore-disks-only)
       restore_method_b \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" "$source_sub_flag" \
@@ -717,7 +715,7 @@ main() {
         "$dry_run" "$timeout_minutes" "$poll_seconds"
       ;;
 
-    method-d)
+    file-recovery)
       restore_method_d \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" \
@@ -725,7 +723,7 @@ main() {
       ;;
 
     *)
-      fail "Unknown restore method '${restore_method}'. Valid values: method-a, method-b, method-c, method-d"
+      fail "Unknown restore method '${restore_method}'. Valid values: create-new-vm, restore-disks-only, replace-existing, file-recovery"
       ;;
   esac
 

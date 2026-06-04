@@ -16,18 +16,18 @@ parameters:
       - hmcts-sandbox-agent-pool
       - hmcts-sds-ptlsbox
   # Which restore method to use. Maps to BCDR failure scenarios:
-  #   method-c  Replace Existing (OriginalLocation, in-place)  — S2: VM non-bootable
-  #   method-a  Create New VM   (AlternateLocation)            — S3: VM deleted
-  #   method-b  Restore Managed Disks only (disk-only)         — S3, S4: DR drill
-  #   method-d  Item-Level Recovery (ILR / file recovery)      — S1, S5: file/data loss
+  #   replace-existing  Replace Existing (OriginalLocation, in-place)  — S2: VM non-bootable
+  #   create-new-vm  Create New VM   (AlternateLocation)            — S3: VM deleted
+  #   restore-disks-only  Restore Managed Disks only (disk-only)         — S3, S4: DR drill
+  #   file-recovery  Item-Level Recovery (ILR / file recovery)      — S1, S5: file/data loss
   - name: restoreMethod
     type: string
-    default: method-c
+    default: replace-existing
     values:
-      - method-c
-      - method-a
-      - method-b
-      - method-d
+      - replace-existing
+      - create-new-vm
+      - restore-disks-only
+      - file-recovery
   - name: sourceVmName
     type: string
   - name: sourceResourceGroup
@@ -62,7 +62,7 @@ parameters:
     type: string
     default: 'none'
   # Pre-provisioned staging storage account used during disk restore operations.
-  # Required for method-a, method-b, method-c. Not used for method-d.
+  # Required for create-new-vm, restore-disks-only, replace-existing. Not used for file-recovery.
   # Must match the storage account deployed by the azure-backup-vault Terraform module.
   - name: stagingStorageAccount
     type: string
@@ -70,31 +70,31 @@ parameters:
   - name: stagingStorageAccountResourceGroup
     type: string
     default: 'mgmt-infra-prod-rg'
-  # Target resource group for method-a and method-b.
+  # Target resource group for create-new-vm and restore-disks-only.
   # Leave as 'none' to use the source VM's resource group.
   - name: targetResourceGroup
     type: string
     default: 'none'
-  # Target subscription for cross-subscription restores (method-a, method-b).
+  # Target subscription for cross-subscription restores (create-new-vm, restore-disks-only).
   # Leave as 'none' to restore within the same subscription.
-  # Note: method-c does not support cross-subscription restore.
+  # Note: replace-existing does not support cross-subscription restore.
   - name: targetSubscription
     type: string
     default: 'none'
-  # Target VM name for method-a (Create New VM).
+  # Target VM name for create-new-vm (Create New VM).
   # Leave as 'none' to auto-generate as "${sourceVmName}-restore-<HHMMddmmyy>".
   - name: targetVmName
     type: string
     default: 'none'
-  # Target VNet name — required for method-a.
+  # Target VNet name — required for create-new-vm.
   - name: targetVnetName
     type: string
     default: 'none'
-  # Target subnet name — required for method-a.
+  # Target subnet name — required for create-new-vm.
   - name: targetSubnetName
     type: string
     default: 'none'
-  # Target VNet resource group — required for method-a.
+  # Target VNet resource group — required for create-new-vm.
   - name: targetVnetResourceGroup
     type: string
     default: 'none'
@@ -159,7 +159,7 @@ stages:
           - script: |
               set -euo pipefail
               TARGET_VM="${TARGET_VM_NAME}"
-              if [[ "${RESTORE_METHOD}" == "method-a" && ( -z "${TARGET_VM}" || "${TARGET_VM}" == "none" ) ]]; then
+              if [[ "${RESTORE_METHOD}" == "create-new-vm" && ( -z "${TARGET_VM}" || "${TARGET_VM}" == "none" ) ]]; then
                 TARGET_VM="${SOURCE_VM_NAME}-restore-$(date -u +"%H%M%d%m%y")"
                 echo "Auto-generated target VM name: ${TARGET_VM}"
               fi
@@ -312,7 +312,7 @@ stages:
   # ---------------------------------------------------------------------------
   # Stage 3: Validate
   # Confirms the restore produced the expected outcome.
-  # Skipped when dryRun=true or restoreMethod=method-d (ILR is operator-driven).
+  # Skipped when dryRun=true or restoreMethod=file-recovery (ILR is operator-driven).
   # ---------------------------------------------------------------------------
   - stage: Validate
     displayName: 'Stage 3: Validate restore'
@@ -323,7 +323,7 @@ stages:
       and(
         succeeded('Restore'),
         eq('${{ parameters.dryRun }}', 'false'),
-        ne('${{ parameters.restoreMethod }}', 'method-d')
+        ne('${{ parameters.restoreMethod }}', 'file-recovery')
       )
     variables:
       resolvedTargetVmName: $[ stageDependencies.Preflight.PreflightCheck.outputs['resolveTargetVmName.resolvedTargetVmName'] ]
@@ -353,8 +353,8 @@ stages:
                 fi
 
                 case "${RESTORE_METHOD}" in
-                  method-c)
-                    echo "Validating method-c: checking VM ${SOURCE_VM_NAME} is running..."
+                  replace-existing)
+                    echo "Validating replace-existing: checking VM ${SOURCE_VM_NAME} is running..."
                     # shellcheck disable=SC2086
                     POWER_STATE=$(az vm get-instance-view \
                       --name "${SOURCE_VM_NAME}" \
@@ -366,11 +366,11 @@ stages:
                     echo "PASS: VM ${SOURCE_VM_NAME} is running."
                     ;;
 
-                  method-a)
+                  create-new-vm)
                     TARGET_RG="${TARGET_RESOURCE_GROUP}"
                     [[ "$TARGET_RG" == "none" || -z "$TARGET_RG" ]] && TARGET_RG="${SOURCE_RESOURCE_GROUP}"
                     TARGET_VM="${RESOLVED_TARGET_VM_NAME}"
-                    echo "Validating method-a: checking new VM ${TARGET_VM} exists in ${TARGET_RG}..."
+                    echo "Validating create-new-vm: checking new VM ${TARGET_VM} exists in ${TARGET_RG}..."
                     # shellcheck disable=SC2086
                     POWER_STATE=$(az vm get-instance-view \
                       --name "${TARGET_VM}" \
@@ -382,10 +382,10 @@ stages:
                     echo "PASS: VM ${TARGET_VM} exists (state: ${POWER_STATE})."
                     ;;
 
-                  method-b)
+                  restore-disks-only)
                     TARGET_RG="${TARGET_RESOURCE_GROUP}"
                     [[ "$TARGET_RG" == "none" || -z "$TARGET_RG" ]] && TARGET_RG="${SOURCE_RESOURCE_GROUP}"
-                    echo "Validating method-b: checking restored disks exist in ${TARGET_RG}..."
+                    echo "Validating restore-disks-only: checking restored disks exist in ${TARGET_RG}..."
                     # shellcheck disable=SC2086
                     DISK_COUNT=$(az disk list -g "${TARGET_RG}" $TARGET_SUB_FLAG \
                       --query "length([?contains(name, '${SOURCE_VM_NAME}')])" -o tsv 2>/dev/null || echo 0)
