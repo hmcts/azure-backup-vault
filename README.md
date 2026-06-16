@@ -1,6 +1,6 @@
 # Azure Backup Vault
 
-A Terraform-based infrastructure-as-code solution for deploying and managing Azure Backup Vaults across HMCTS environments.
+A Terraform-based infrastructure-as-code solution for deploying and managing Azure Recovery Services Vaults across HMCTS environments.
 
 ## Overview
 
@@ -41,7 +41,7 @@ azure-backup-vault/
 
 The CNP component creates Azure Recovery Services Vaults configured for the CNP platform. It includes:
 
-- **Backup Vault Creation**: Provisions Azure Recovery Services Vaults with configurable redundancy and immutability settings
+- **Recovery Services Vault Creation**: Provisions Azure Recovery Services Vaults with configurable redundancy and immutability settings
 - **Backup Policies**: Enables optional PostgreSQL-specific backup policies (CRIT4/5 and test environments)
 - **Disaster Recovery**: Supports cross-region restore for regional outage scenarios
 - **Compliance**: Integrates extended retention policies for MOJ compliance requirements
@@ -53,7 +53,7 @@ The CNP component creates Azure Recovery Services Vaults configured for the CNP 
 
 ### CPP Production (`environments/prod/`)
 
-The CPP production environment contains the CPP backup vault configuration:
+The CPP production environment contains the CPP Recovery Services Vault configuration:
 
 - **Immutability**: Unlocked for initial deployment, can be locked after validation
 - **Cross-Region Restore**: Enabled for business continuity
@@ -65,7 +65,7 @@ The CPP production environment contains the CPP backup vault configuration:
 
 ### CNP Production (`environments/prod/`)
 
-The CNP production environment contains fully hardened backup vault configurations:
+The CNP production environment contains fully hardened Recovery Services Vault configurations:
 
 - **Immutability**: Unlocked for initial deployment, can be locked after validation
 - **Cross-Region Restore**: Enabled for business continuity
@@ -123,9 +123,9 @@ See the [Operational Runbook](./docs/postgresql-restore-automation-runbook.md) f
 
 ---
 
-### Adding a New Backup Vault
+### Adding a New Recovery Services Vault
 
-To add a new backup vault configuration:
+To add a new Recovery Services Vault configuration:
 
 1. Update the appropriate environment's `cnp.tfvars` file
 2. Add a new entry to the `backup_vaults` map with desired configuration
@@ -161,7 +161,7 @@ To add a new backup vault configuration:
 | `location` | `uksouth` | Azure region for resources |
 | `expiresAfter` | `3000-01-01` | Resource expiration date for cost management |
 
-### Backup Vault Configuration Options
+### Recovery Services Vault Configuration Options
 
 All options are nested within the `backup_vaults` map:
 
@@ -181,7 +181,7 @@ All options are nested within the `backup_vaults` map:
 The module provides the following outputs:
 
 - **Vault ID**: Azure Resource Manager ID of the created vault
-- **Vault Name**: Name of the created backup vault
+- **Vault Name**: Name of the created Recovery Services Vault
 - **Resource Group**: Name of the resource group containing the vault
 
 See [components/cnp/output.tf](components/cnp/output.tf) for complete output definitions.
@@ -215,7 +215,7 @@ All resources follow the HMCTS naming convention:
 {product}-{resource-type}-{environment}
 ```
 
-Example: `cnp-vault-prod` (Backup Vault for CNP in Production)
+Example: `cnp-vault-prod` (Recovery Services Vault for CNP in Production)
 
 ## Tagging Strategy
 
@@ -258,8 +258,8 @@ CNP sandbox policies are simplified to support rapid testing and development wit
 
 ## Related Documentation
 
-- [Azure Recovery Services Vault Documentation](https://docs.microsoft.com/en-us/azure/backup/backup-vault-overview)
-- [HMCTS Terraform Module - Backup Vault](https://github.com/hmcts/module-terraform-azurerm-backup-vault)
+- [Azure Recovery Services Vault Documentation](https://docs.microsoft.com/en-us/azure/backup/backup-azure-recovery-services-vault-overview)
+- [HMCTS Terraform Module - Recovery Services Vault](https://github.com/hmcts/module-terraform-azurerm-backup-vault)
 - [Common Tags Module](https://github.com/hmcts/terraform-module-common-tags)
 
 ## Support
