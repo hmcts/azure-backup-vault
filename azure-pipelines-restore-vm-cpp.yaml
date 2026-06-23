@@ -67,8 +67,10 @@ parameters:
   # Must match the storage account deployed by the azure-backup-vault Terraform module.
   - name: stagingStorageAccount
     type: string
+    default: 'sacppvaultrestoreprd'
   - name: stagingStorageAccountResourceGroup
     type: string
+    default: 'cpp-infra-prd'
   # Target resource group for create-new-vm and restore-disks-only.
   # Leave as 'none' to use the source VM's resource group.
   - name: targetResourceGroup
