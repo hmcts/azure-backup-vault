@@ -6,6 +6,12 @@ data "azurerm_user_assigned_identity" "jenkins_ptl_mi" {
   resource_group_name = "managed-identities-ptl-rg"
 }
 
+data "azurerm_user_assigned_identity" "jenkins_prod_mi" {
+  count               = var.env == "prod" ? 1 : 0
+  name                = "jenkins-prod-mi"
+  resource_group_name = "managed-identities-prod-rg"
+}
+
 
 data "azurerm_subnet" "cft_ptl_aks_00" {
   provider             = azurerm.cftptl
