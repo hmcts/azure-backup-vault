@@ -12,7 +12,7 @@ module "tags" {
   product      = var.product
   builtFrom    = var.builtFrom
   expiresAfter = var.expiresAfter
-} 
+}
 
 # Module call to create backup vaults
 module "backup_vaults" {
