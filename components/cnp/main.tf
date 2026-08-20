@@ -12,7 +12,7 @@ module "tags" {
   product      = var.product
   builtFrom    = var.builtFrom
   expiresAfter = var.expiresAfter
-}
+} 
 
 # Module call to create backup vaults
 module "backup_vaults" {
@@ -50,6 +50,14 @@ resource "azurerm_role_assignment" "jenkins_ptl_mi_contributor_cnp_vault" {
   scope                = module.backup_vaults["cnp-backup-vault"].backup_vault_id
   role_definition_name = "Contributor"
   principal_id         = data.azurerm_user_assigned_identity.jenkins_ptl_mi[0].principal_id
+}
+
+# Role assignment for jenkins-prod-mi on cnp-backup-vault (prod only)
+resource "azurerm_role_assignment" "jenkins_prod_mi_contributor_cnp_vault" {
+  count                = var.env == "prod" ? 1 : 0
+  scope                = module.backup_vaults["cnp-backup-vault"].backup_vault_id
+  role_definition_name = "Contributor"
+  principal_id         = data.azurerm_user_assigned_identity.jenkins_prod_mi[0].principal_id
 }
 
 # Module call to create storage accounts for backup restoration
