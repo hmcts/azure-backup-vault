@@ -2,6 +2,7 @@
 
 sharedservicesptl_subscription_id     = "6c4d2513-a873-41b4-afdd-b05a33206631"
 sharedservicesptlsbox_subscription_id = "64b1c6d6-1481-44ad-b620-d8fe26a2c768"
+sharedservicesprod_subscription_id    = "5ca62022-6aa2-4cee-aaa7-e7536c8d566c"
 cftptl_subscription_id                = "1baf5470-1c3e-40d3-a6f7-74bfbce4b348"
 cftptlsbox_subscription_id            = "1497c3d7-ab6d-4bb7-8a10-b51d03189ee3"
 

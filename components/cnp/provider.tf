@@ -32,6 +32,15 @@ provider "azurerm" {
   resource_provider_registrations = "none"
 }
 
+# Provider for DTS-SHAREDSERVICESPTL-PROD subscription
+provider "azurerm" {
+  features {}
+  alias                           = "sharedservicesprod"
+  subscription_id                 = var.sharedservicesprod_subscription_id
+  resource_provider_registrations = "none"
+}
+
+
 # Provider for DTS-CFTPTL subscription
 provider "azurerm" {
   features {}

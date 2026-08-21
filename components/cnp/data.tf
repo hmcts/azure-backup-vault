@@ -8,6 +8,7 @@ data "azurerm_user_assigned_identity" "jenkins_ptl_mi" {
 
 data "azurerm_user_assigned_identity" "jenkins_prod_mi" {
   count               = var.env == "prod" ? 1 : 0
+  provider            = azurerm.sharedservicesprod
   name                = "jenkins-prod-mi"
   resource_group_name = "managed-identities-prod-rg"
 }
