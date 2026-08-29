@@ -6,7 +6,7 @@ pr: none
 parameters:
   - name: serviceConnection
     type: string
-    default: DCD-CNP-Prod
+    default: CNP-DR-Restorations
   - name: agentPool
     type: string
     default: hmcts-cftptl-agent-pool
