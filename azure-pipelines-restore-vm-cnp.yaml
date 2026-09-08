@@ -7,6 +7,7 @@ parameters:
   - name: serviceConnection
     type: string
     default: CNP-VM-Restorations
+    # this needs granting on all the subs# TODO !!!! RY
   - name: agentPool
     type: string
     default: hmcts-cftptl-agent-pool
@@ -54,10 +55,10 @@ parameters:
   - name: recoveryPointId
     type: string
     default: 'none'
-  # ISO-8601 UTC timestamp (e.g. '2026-05-29T14:00:00Z'). Leave as 'none' to
+  # ISO-8601 UTC timestamp (e.g. '2026-08-12T02:19:29Z'). Leave as 'none' to
   # restore from the most recent available recovery point.
   # When provided, selects the latest recovery point at or before this time.
-  # Provide this OR recoveryPointId, not both.
+  # Provide this OR recoveryPointId, not both.  12/08/2026, 02:19:29
   - name: recoveryPointTimeUtc
     type: string
     default: 'none'
