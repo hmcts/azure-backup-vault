@@ -211,8 +211,17 @@ stages:
                   [[ -n "$SELECTED_RP" ]] || { echo "ERROR: Recovery point ${RECOVERY_POINT_ID} not found."; exit 1; }
                 elif [[ -n "${RECOVERY_POINT_TIME_UTC}" && "${RECOVERY_POINT_TIME_UTC}" != "none" ]]; then
                   SELECTED_RP=$(echo "$RECOVERY_POINTS" | jq -r --arg ts "${RECOVERY_POINT_TIME_UTC}" '
-                    map({name: .name, t: (.properties.recoveryPointTime | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)})
-                    | map(select(.t <= ($ts | fromdateiso8601)))
+                    def parse_timestamp:
+                      if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+                      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%m/%d/%Y %H:%M:%S") | mktime
+                      else
+                        gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601
+                      end;
+                    ($ts | parse_timestamp) as $requested_time
+                    | map({name: .name, t: (.properties.recoveryPointTime | parse_timestamp)})
+                    | map(select(.t <= $requested_time))
                     | sort_by(.t) | last | .name // empty')
                   [[ -n "$SELECTED_RP" ]] || { echo "ERROR: No recovery point found at or before ${RECOVERY_POINT_TIME_UTC}."; exit 1; }
                 else

@@ -85,11 +85,20 @@ select_recovery_point() {
 
   if [[ -n "$recovery_point_time_utc" ]]; then
     echo "$recovery_points_json" | jq -r --arg ts "$recovery_point_time_utc" '
-      map({
+      def parse_timestamp:
+        if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+          strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+        elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+          strptime("%m/%d/%Y %H:%M:%S") | mktime
+        else
+          gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601
+        end;
+      ($ts | parse_timestamp) as $requested_time
+      | map({
         name: .name,
-        t: (.properties.recoveryPointTime | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)
+        t: (.properties.recoveryPointTime | parse_timestamp)
       })
-      | map(select(.t <= ($ts | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)))
+      | map(select(.t <= $requested_time))
       | sort_by(.t)
       | last
       | .name // empty
