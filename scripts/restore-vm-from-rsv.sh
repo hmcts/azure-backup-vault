@@ -24,6 +24,7 @@ set -euo pipefail
 #   RESTORE_METHOD                replace-existing | create-new-vm | restore-disks-only | file-recovery
 #   STAGING_STORAGE_ACCOUNT       Pre-provisioned storage account for disk staging
 #   STAGING_STORAGE_ACCOUNT_RG    Resource group of the staging storage account
+#   STAGING_STORAGE_ACCOUNT_SUBSCRIPTION  Subscription containing the staging account
 #   DRY_RUN                       true | false (default: true)
 #
 # Optional environment variables:
@@ -235,9 +236,10 @@ restore_replace_existing() {
   local selected_rp="$7"
   local staging_sa="$8"
   local staging_sa_rg="$9"
-  local dry_run="${10}"
-  local timeout_minutes="${11}"
-  local poll_seconds="${12}"
+  local staging_sa_id="${10}"
+  local dry_run="${11}"
+  local timeout_minutes="${12}"
+  local poll_seconds="${13}"
 
   local start_time job_id job_status end_time
 
@@ -287,7 +289,7 @@ restore_replace_existing() {
     --container-name "$source_vm" \
     --item-name "$source_vm" \
     --rp-name "$selected_rp" \
-    --storage-account "$staging_sa" \
+    --storage-account "$staging_sa_id" \
     --storage-account-resource-group "$staging_sa_rg" \
     --restore-mode OriginalLocation \
     -o json)
@@ -333,15 +335,16 @@ restore_create_new_vm() {
   local selected_rp="$6"
   local staging_sa="$7"
   local staging_sa_rg="$8"
-  local target_rg="${9}"
-  local target_sub_flag="${10}"
-  local target_vm_name="${11}"
-  local target_vnet_name="${12}"
-  local target_subnet_name="${13}"
-  local target_vnet_rg="${14}"
-  local dry_run="${15}"
-  local timeout_minutes="${16}"
-  local poll_seconds="${17}"
+  local staging_sa_id="${9}"
+  local target_rg="${10}"
+  local target_sub_flag="${11}"
+  local target_vm_name="${12}"
+  local target_vnet_name="${13}"
+  local target_subnet_name="${14}"
+  local target_vnet_rg="${15}"
+  local dry_run="${16}"
+  local timeout_minutes="${17}"
+  local poll_seconds="${18}"
 
   local start_time job_id job_status end_time
 
@@ -392,7 +395,7 @@ restore_create_new_vm() {
     --container-name "$source_vm" \
     --item-name "$source_vm" \
     --rp-name "$selected_rp" \
-    --storage-account "$staging_sa" \
+    --storage-account "$staging_sa_id" \
     --storage-account-resource-group "$staging_sa_rg" \
     --restore-to-staging-storage-account true \
     --target-resource-group "$target_rg" \
@@ -438,11 +441,12 @@ restore_disks_only() {
   local selected_rp="$6"
   local staging_sa="$7"
   local staging_sa_rg="$8"
-  local target_rg="${9}"
-  local target_sub_flag="${10}"
-  local dry_run="${11}"
-  local timeout_minutes="${12}"
-  local poll_seconds="${13}"
+  local staging_sa_id="${9}"
+  local target_rg="${10}"
+  local target_sub_flag="${11}"
+  local dry_run="${12}"
+  local timeout_minutes="${13}"
+  local poll_seconds="${14}"
 
   local start_time job_id job_status end_time
 
@@ -487,7 +491,7 @@ restore_disks_only() {
     --container-name "$source_vm" \
     --item-name "$source_vm" \
     --rp-name "$selected_rp" \
-    --storage-account "$staging_sa" \
+    --storage-account "$staging_sa_id" \
     --storage-account-resource-group "$staging_sa_rg" \
     --restore-to-staging-storage-account true \
     --target-resource-group "$target_rg" \
@@ -630,9 +634,22 @@ main() {
   # Method D does not use a staging storage account
   local staging_sa="${STAGING_STORAGE_ACCOUNT:-}"
   local staging_sa_rg="${STAGING_STORAGE_ACCOUNT_RG:-}"
+  local staging_sa_subscription="${STAGING_STORAGE_ACCOUNT_SUBSCRIPTION:-}"
+  [[ "$staging_sa_subscription" == "none" ]] && staging_sa_subscription=""
   if [[ "$restore_method" != "file-recovery" ]]; then
     [[ -n "$staging_sa" ]] || fail "STAGING_STORAGE_ACCOUNT is required for ${restore_method}"
     [[ -n "$staging_sa_rg" ]] || fail "STAGING_STORAGE_ACCOUNT_RG is required for ${restore_method}"
+    [[ -n "$staging_sa_subscription" ]] || fail "STAGING_STORAGE_ACCOUNT_SUBSCRIPTION is required for ${restore_method}"
+  fi
+
+  local staging_sa_id=""
+  if [[ "$restore_method" != "file-recovery" ]]; then
+    staging_sa_id=$(az storage account show \
+      --name "$staging_sa" \
+      --resource-group "$staging_sa_rg" \
+      --subscription "$staging_sa_subscription" \
+      --query id -o tsv) || fail "Could not resolve staging storage account '${staging_sa}' in subscription '${staging_sa_subscription}'."
+    [[ -n "$staging_sa_id" ]] || fail "Staging storage account resource ID is empty."
   fi
 
   # Build optional subscription flags
@@ -700,7 +717,7 @@ main() {
       restore_replace_existing \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" "$source_sub_flag" \
-        "$selected_rp" "$staging_sa" "$staging_sa_rg" \
+        "$selected_rp" "$staging_sa" "$staging_sa_rg" "$staging_sa_id" \
         "$dry_run" "$timeout_minutes" "$poll_seconds"
       ;;
 
@@ -711,7 +728,7 @@ main() {
       restore_create_new_vm \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" \
-        "$selected_rp" "$staging_sa" "$staging_sa_rg" \
+        "$selected_rp" "$staging_sa" "$staging_sa_rg" "$staging_sa_id" \
         "$target_rg" "$target_sub_flag" "$target_vm_name" \
         "$target_vnet_name" "$target_subnet_name" "$target_vnet_rg" \
         "$dry_run" "$timeout_minutes" "$poll_seconds"
@@ -721,7 +738,7 @@ main() {
       restore_disks_only \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" \
-        "$selected_rp" "$staging_sa" "$staging_sa_rg" \
+        "$selected_rp" "$staging_sa" "$staging_sa_rg" "$staging_sa_id" \
         "$target_rg" "$target_sub_flag" \
         "$dry_run" "$timeout_minutes" "$poll_seconds"
       ;;
