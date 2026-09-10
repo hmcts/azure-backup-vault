@@ -228,24 +228,42 @@ EOF
 # ensure_staging_storage_account
 #
 # Ensures a Standard_LRS staging storage account exists in the given resource
-# group, creating one if needed. The name is derived deterministically from
-# the resource group so repeat restores reuse the same account. Prints the
+# group, creating one if needed. The name is derived from the RSV name so
+# repeat restores reuse the same account. Prints the
 # resolved storage account resource ID (or, in dry-run when the account
 # doesn't exist yet, its would-be name) to stdout — callers must capture this
 # via command substitution, so all status logging here is sent to stderr.
 # ---------------------------------------------------------------------------
 ensure_staging_storage_account() {
-  local rg="$1"
-  local sub_flag="${2:-}"
-  local dry_run="$3"
+  local vault_name="$1"
+  local vault_rg="$2"
+  local vault_sub_flag="${3:-}"
+  local rg="$4"
+  local sub_flag="${5:-}"
+  local dry_run="$6"
 
-  local hash
-  if command -v sha1sum >/dev/null 2>&1; then
-    hash=$(printf '%s' "$rg" | sha1sum | cut -c1-20)
-  else
-    hash=$(printf '%s' "$rg" | shasum -a 1 | cut -c1-20)
+  local sanitised_vault_name
+  sanitised_vault_name=$(echo "$vault_name" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
+  local sa_name="${sanitised_vault_name:0:19}rsvsa"
+
+  # Read vault tags before creating the replacement staging resource.
+  local vault_tags_json
+  # shellcheck disable=SC2086
+  vault_tags_json=$(az resource show \
+    --name "$vault_name" \
+    --resource-group "$vault_rg" \
+    --resource-type Microsoft.RecoveryServices/vaults \
+    $vault_sub_flag \
+    --query tags -o json) || fail "Could not read tags from Recovery Services vault ${vault_name}."
+
+  local tag_args=()
+  while IFS=$'\t' read -r tag_key tag_value; do
+    [[ -n "$tag_key" ]] && tag_args+=("${tag_key}=${tag_value}")
+  done < <(echo "$vault_tags_json" | jq -r '. + {purpose: "rsv staging storage account"} | to_entries[] | [.key, (.value | tostring)] | @tsv')
+  local tag_cli_args=()
+  if (( ${#tag_args[@]} > 0 )); then
+    tag_cli_args=(--tags "${tag_args[@]}")
   fi
-  local sa_name="vmr${hash}"
 
   # shellcheck disable=SC2086
   local existing_id
@@ -262,7 +280,7 @@ ensure_staging_storage_account() {
   location=$(az group show --name "$rg" $sub_flag --query location -o tsv) || fail "Could not resolve location for resource group ${rg}."
 
   if [[ "${dry_run,,}" == "true" ]]; then
-    log "[DRY RUN] Would create staging storage account: ${sa_name} in ${rg} (${location}, Standard_LRS)" >&2
+    log "[DRY RUN] Would create staging storage account: ${sa_name} in ${rg} (${location}, Standard_LRS) with ${#tag_args[@]} vault tag(s)" >&2
     echo "$sa_name"
     return 0
   fi
@@ -277,6 +295,7 @@ ensure_staging_storage_account() {
     --kind StorageV2 \
     --min-tls-version TLS1_2 \
     --allow-blob-public-access false \
+    "${tag_cli_args[@]}" \
     $sub_flag \
     --output none || fail "Failed to create staging storage account ${sa_name} in ${rg}."
 
@@ -319,7 +338,7 @@ restore_replace_existing() {
   local staging_sub_flag="$source_sub_flag"
   [[ -z "$staging_sub_flag" ]] && staging_sub_flag="$vault_sub_flag"
   local staging_sa_id
-  staging_sa_id=$(ensure_staging_storage_account "$source_rg" "$staging_sub_flag" "$dry_run")
+  staging_sa_id=$(ensure_staging_storage_account "$vault_name" "$vault_rg" "$vault_sub_flag" "$source_rg" "$staging_sub_flag" "$dry_run")
   log "Staging account:   ${staging_sa_id}"
 
   if [[ "${dry_run,,}" == "true" ]]; then
@@ -427,7 +446,7 @@ restore_create_new_vm() {
   local staging_sub_flag="$target_sub_flag"
   [[ -z "$staging_sub_flag" ]] && staging_sub_flag="$vault_sub_flag"
   local staging_sa_id
-  staging_sa_id=$(ensure_staging_storage_account "$target_rg" "$staging_sub_flag" "$dry_run")
+  staging_sa_id=$(ensure_staging_storage_account "$vault_name" "$vault_rg" "$vault_sub_flag" "$target_rg" "$staging_sub_flag" "$dry_run")
   log "Staging account:   ${staging_sa_id}"
 
   if [[ "${dry_run,,}" == "true" ]]; then
@@ -527,7 +546,7 @@ restore_disks_only() {
   local staging_sub_flag="$target_sub_flag"
   [[ -z "$staging_sub_flag" ]] && staging_sub_flag="$vault_sub_flag"
   local staging_sa_id
-  staging_sa_id=$(ensure_staging_storage_account "$target_rg" "$staging_sub_flag" "$dry_run")
+  staging_sa_id=$(ensure_staging_storage_account "$vault_name" "$vault_rg" "$vault_sub_flag" "$target_rg" "$staging_sub_flag" "$dry_run")
   log "Staging account:   ${staging_sa_id}"
 
   if [[ "${dry_run,,}" == "true" ]]; then
