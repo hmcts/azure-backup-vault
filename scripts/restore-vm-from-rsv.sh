@@ -257,7 +257,7 @@ restore_replace_existing() {
     log "       --container-name ${source_vm} --item-name ${source_vm} \\"
     log "       --rp-name ${selected_rp} \\"
     log "       --storage-account ${staging_sa} \\"
-    log "       --storage-account-resource-group ${staging_sa_rg} \\"
+    log "       # resolved in staging subscription: ${staging_sa_id}"
     log "       --restore-mode OriginalLocation"
     log "  4. az vm start     --name ${source_vm} -g ${source_rg} ${source_sub_flag}"
     log "[DRY RUN] No changes made."
@@ -290,7 +290,6 @@ restore_replace_existing() {
     --item-name "$source_vm" \
     --rp-name "$selected_rp" \
     --storage-account "$staging_sa_id" \
-    --storage-account-resource-group "$staging_sa_rg" \
     --restore-mode OriginalLocation \
     -o json)
 
@@ -363,7 +362,7 @@ restore_create_new_vm() {
     log "    --container-name ${source_vm} --item-name ${source_vm} \\"
     log "    --rp-name ${selected_rp} \\"
     log "    --storage-account ${staging_sa} \\"
-    log "    --storage-account-resource-group ${staging_sa_rg} \\"
+    log "    # resolved in staging subscription: ${staging_sa_id}"
     log "    --restore-to-staging-storage-account true \\"
     log "    --target-resource-group ${target_rg} ${target_sub_flag} \\"
     log "    --target-vm-name ${target_vm_name} \\"
@@ -396,7 +395,6 @@ restore_create_new_vm() {
     --item-name "$source_vm" \
     --rp-name "$selected_rp" \
     --storage-account "$staging_sa_id" \
-    --storage-account-resource-group "$staging_sa_rg" \
     --restore-to-staging-storage-account true \
     --target-resource-group "$target_rg" \
     $target_sub_id_flag \
@@ -463,7 +461,7 @@ restore_disks_only() {
     log "    --container-name ${source_vm} --item-name ${source_vm} \\"
     log "    --rp-name ${selected_rp} \\"
     log "    --storage-account ${staging_sa} \\"
-    log "    --storage-account-resource-group ${staging_sa_rg} \\"
+    log "    # resolved in staging subscription: ${staging_sa_id}"
     log "    --restore-to-staging-storage-account true \\"
     log "    --target-resource-group ${target_rg} ${target_sub_flag}"
     log "[DRY RUN] No changes made."
@@ -492,7 +490,6 @@ restore_disks_only() {
     --item-name "$source_vm" \
     --rp-name "$selected_rp" \
     --storage-account "$staging_sa_id" \
-    --storage-account-resource-group "$staging_sa_rg" \
     --restore-to-staging-storage-account true \
     --target-resource-group "$target_rg" \
     $target_sub_id_flag \
