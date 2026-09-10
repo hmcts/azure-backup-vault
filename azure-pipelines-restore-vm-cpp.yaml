@@ -62,19 +62,6 @@ parameters:
   - name: recoveryPointTimeUtc
     type: string
     default: 'none'
-  # Pre-provisioned staging storage account used during disk restore operations.
-  # Required for create-new-vm, restore-disks-only, replace-existing. Not used for file-recovery.
-  # Must match the storage account deployed by the azure-backup-vault Terraform module.
-  - name: stagingStorageAccount
-    type: string
-    default: 'sacppvaultrestoreprd'
-  - name: stagingStorageAccountResourceGroup
-    type: string
-    default: 'cpp-infra-prd'
-  # Subscription containing the staging storage account.
-  - name: stagingStorageAccountSubscription
-    type: string
-    default: 'none'
   # Target resource group for create-new-vm and restore-disks-only.
   # Leave as 'none' to use the source VM's resource group.
   - name: targetResourceGroup
@@ -156,9 +143,6 @@ stages:
               echo "vaultSubscription:            ${{ parameters.vaultSubscription }}"
               echo "recoveryPointId:              ${{ parameters.recoveryPointId }}"
               echo "recoveryPointTimeUtc:         ${{ parameters.recoveryPointTimeUtc }}"
-              echo "stagingStorageAccount:        ${{ parameters.stagingStorageAccount }}"
-              echo "stagingStorageAccountRG:      ${{ parameters.stagingStorageAccountResourceGroup }}"
-              echo "stagingStorageAccountSub:     ${{ parameters.stagingStorageAccountSubscription }}"
               echo "targetResourceGroup:          ${{ parameters.targetResourceGroup }}"
               echo "targetSubscription:           ${{ parameters.targetSubscription }}"
               echo "targetVmName:                 ${{ parameters.targetVmName }}"
@@ -312,9 +296,6 @@ stages:
                     RESTORE_METHOD: ${{ parameters.restoreMethod }}
                     RECOVERY_POINT_ID: $(selectedRecoveryPointId)
                     RECOVERY_POINT_TIME_UTC: ${{ parameters.recoveryPointTimeUtc }}
-                    STAGING_STORAGE_ACCOUNT: ${{ parameters.stagingStorageAccount }}
-                    STAGING_STORAGE_ACCOUNT_RG: ${{ parameters.stagingStorageAccountResourceGroup }}
-                    STAGING_STORAGE_ACCOUNT_SUBSCRIPTION: ${{ parameters.stagingStorageAccountSubscription }}
                     TARGET_RESOURCE_GROUP: ${{ parameters.targetResourceGroup }}
                     TARGET_SUBSCRIPTION: ${{ parameters.targetSubscription }}
                     TARGET_VM_NAME: $(resolvedTargetVmName)
