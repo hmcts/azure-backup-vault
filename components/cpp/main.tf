@@ -61,7 +61,7 @@ module "backup_vaults" {
 module "restore_storage_account" {
   for_each = var.storage_accounts
 
-  source = "git::https://github.com/hmcts/cpp-module-terraform-azurerm-storage-account.git?ref=feature/private-link-access"
+  source = "git::https://github.com/hmcts/cpp-module-terraform-azurerm-storage-account.git?ref=DTSPO-34556"
 
   storage_account_name          = substr(replace(lower("sa${each.key}${var.environment}"), "/[^a-z0-9]/", ""), 0, 24)
   location                      = var.location
