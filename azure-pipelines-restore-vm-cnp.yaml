@@ -276,6 +276,19 @@ stages:
                     scriptLocation: inlineScript
                     inlineScript: |
                       set -euo pipefail
+                      CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv)
+                      VAULT_SUBSCRIPTION_ID="$CURRENT_SUBSCRIPTION"
+                      if [[ -n "${VAULT_SUBSCRIPTION:-}" && "${VAULT_SUBSCRIPTION}" != "none" ]]; then
+                        VAULT_SUBSCRIPTION_ID=$(az account show --subscription "${VAULT_SUBSCRIPTION}" --query id -o tsv)
+                        export VAULT_SUBSCRIPTION="$VAULT_SUBSCRIPTION_ID"
+                      fi
+                      if [[ -n "${TARGET_SUBSCRIPTION:-}" && "${TARGET_SUBSCRIPTION}" != "none" ]]; then
+                        TARGET_SUBSCRIPTION=$(az account show --subscription "${TARGET_SUBSCRIPTION}" --query id -o tsv)
+                        if [[ "$TARGET_SUBSCRIPTION" == "$VAULT_SUBSCRIPTION_ID" ]]; then
+                          TARGET_SUBSCRIPTION="none"
+                        fi
+                        export TARGET_SUBSCRIPTION
+                      fi
                       chmod +x scripts/restore-vm-from-rsv.sh
                       ./scripts/restore-vm-from-rsv.sh
                   env:
