@@ -1,5 +1,8 @@
 name: Azure RSV VM Restore - CPP
 
+# wrapper for the Vault restore CLI functions which provides authorisation/
+# approval gating. If required, pipeline will deploy a 'staging' storage
+# account to the target sub to assist with restore process.
 trigger: none
 pr: none
 
@@ -10,6 +13,9 @@ parameters:
     values:
       - live
       - nonlive
+  # Service Connection managed identity
+  # this needs contributor (at least Vault operator) 
+  # on the source vault and contributor on target sub
   - name: agentPool
     type: string
     default: MPD-ADO-AGENTS-01

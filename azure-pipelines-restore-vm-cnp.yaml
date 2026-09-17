@@ -1,5 +1,9 @@
 name: Azure RSV VM Restore - CNP
 
+# wrapper for the Vault restore CLI functions which provides authorisation/
+# approval gating. If required, pipeline will deploy a 'staging' storage
+# account to the target sub to assist with restore process.
+
 trigger: none
 pr: none
 
@@ -7,7 +11,8 @@ parameters:
   - name: serviceConnection
     type: string
     default: CNP-VM-Restorations
-    # this needs granting on all the subs# TODO !!!! RY
+    # this needs contributor (at least Vault operator) 
+    # on the source vault and target sub
   - name: agentPool
     type: string
     default: hmcts-cftptl-agent-pool
