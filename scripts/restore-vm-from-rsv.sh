@@ -22,15 +22,28 @@ set -euo pipefail
 #   SOURCE_VM_NAME                Name of the VM to restore
 #   SOURCE_RESOURCE_GROUP         Resource group of the source VM
 #   RESTORE_METHOD                replace-existing | create-new-vm | restore-disks-only | file-recovery
-#   STAGING_STORAGE_ACCOUNT       Pre-provisioned storage account for disk staging
-#   STAGING_STORAGE_ACCOUNT_RG    Resource group of the staging storage account
 #   DRY_RUN                       true | false (default: true)
+#
+# Staging storage account:
+#   A Standard_LRS storage account is auto-provisioned (if one doesn't
+#   already exist) in the resource group that will hold the restored disks
+#   (SOURCE_RESOURCE_GROUP for replace-existing, TARGET_RESOURCE_GROUP for the
+#   other methods). Its name is derived deterministically from that resource
+#   group, so repeat restores reuse the same account instead of creating new
+#   ones. Azure Backup requires the staging account to be in the vault
+#   subscription or the protected VM's subscription, which this satisfies.
+#   tech debt:
+#   - this isn't as locked down as it should be but functions to get the restore going.
+#   - recovery managed identity will need permissions on this as well, usually has enough
+#       from getting contributor on the target sub for the original target
+#
 #
 # Optional environment variables:
 #   VAULT_SUBSCRIPTION            RSV subscription; defaults to current CLI context
 #   SOURCE_SUBSCRIPTION           VM subscription; defaults to current CLI context
 #   RECOVERY_POINT_ID             Pin to exact RP name; default: latest available
-#   RECOVERY_POINT_TIME_UTC       Pin to RP at or before this ISO-8601 UTC time
+#   RECOVERY_POINT_TIME_UTC       Pin to RP at or before this RFC 3339 time
+#                                 (for example, 2026-08-12T02:19:29Z)
 #   RESTORE_TIMEOUT_MINUTES       Job timeout; default 240
 #   POLL_SECONDS                  Polling interval; default 30
 #
@@ -53,7 +66,10 @@ log() {
 }
 
 fail() {
-  log "ERROR: $*"
+  # Written directly to stderr (not via log/echo to stdout) so error messages
+  # are not swallowed when this function is called inside a command
+  # substitution (e.g. from ensure_staging_storage_account).
+  echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] ERROR: $*" >&2
   exit 1
 }
 
@@ -85,11 +101,32 @@ select_recovery_point() {
 
   if [[ -n "$recovery_point_time_utc" ]]; then
     echo "$recovery_points_json" | jq -r --arg ts "$recovery_point_time_utc" '
-      map({
+      def parse_timestamp:
+        if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+          strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+        elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4}, [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+          strptime("%d/%m/%Y, %H:%M:%S") | mktime
+        elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+          strptime("%d/%m/%Y %H:%M:%S") | mktime
+        elif test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$") then
+          capture("^(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$") as $timestamp
+          | ($timestamp.date | strptime("%Y-%m-%dT%H:%M:%S") | mktime) as $base
+          | if $timestamp.zone == "Z" then
+              $base
+            else
+              ($timestamp.zone | capture("^(?<sign>[+-])(?<hours>[0-9]{2}):(?<minutes>[0-9]{2})$")) as $offset
+              | (($offset.hours | tonumber) * 3600 + ($offset.minutes | tonumber) * 60) as $offset_seconds
+              | if $offset.sign == "+" then $base - $offset_seconds else $base + $offset_seconds end
+            end
+        else
+          error("Unsupported timestamp format: \(.)")
+        end;
+      ($ts | parse_timestamp) as $requested_time
+      | map({
         name: .name,
-        t: (.properties.recoveryPointTime | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)
+        t: (.properties.recoveryPointTime | parse_timestamp)
       })
-      | map(select(.t <= ($ts | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)))
+      | map(select(.t <= $requested_time))
       | sort_by(.t)
       | last
       | .name // empty
@@ -99,9 +136,29 @@ select_recovery_point() {
 
   # Default: most recent recovery point
   echo "$recovery_points_json" | jq -r '
+    def parse_timestamp:
+      if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+        strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4}, [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+        strptime("%d/%m/%Y, %H:%M:%S") | mktime
+      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+        strptime("%d/%m/%Y %H:%M:%S") | mktime
+      elif test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$") then
+        capture("^(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$") as $timestamp
+        | ($timestamp.date | strptime("%Y-%m-%dT%H:%M:%S") | mktime) as $base
+        | if $timestamp.zone == "Z" then
+            $base
+          else
+            ($timestamp.zone | capture("^(?<sign>[+-])(?<hours>[0-9]{2}):(?<minutes>[0-9]{2})$")) as $offset
+            | (($offset.hours | tonumber) * 3600 + ($offset.minutes | tonumber) * 60) as $offset_seconds
+            | if $offset.sign == "+" then $base - $offset_seconds else $base + $offset_seconds end
+          end
+      else
+        error("Unsupported timestamp format: \(.)")
+      end;
     map({
       name: .name,
-      t: (.properties.recoveryPointTime | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)
+      t: (.properties.recoveryPointTime | parse_timestamp)
     })
     | sort_by(.t)
     | last
@@ -206,6 +263,88 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# ensure_staging_storage_account
+#
+# Ensures a Standard_LRS staging storage account exists in the given resource
+# group, creating one if needed. The name is derived from the RSV name so
+# repeat restores reuse the same account. Prints the
+# resolved storage account resource ID (or, in dry-run when the account
+# doesn't exist yet, its would-be name) to stdout — callers must capture this
+# via command substitution, so all status logging here is sent to stderr.
+# ---------------------------------------------------------------------------
+ensure_staging_storage_account() {
+  local vault_name="$1"
+  local vault_rg="$2"
+  local vault_sub_flag="${3:-}"
+  local rg="$4"
+  local sub_flag="${5:-}"
+  local dry_run="$6"
+
+  local sanitised_vault_name
+  sanitised_vault_name=$(echo "$vault_name" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
+  local sa_name="${sanitised_vault_name:0:19}rsvsa"
+
+  # Read vault tags before creating the replacement staging resource.
+  local vault_tags_json
+  # shellcheck disable=SC2086
+  vault_tags_json=$(az resource show \
+    --name "$vault_name" \
+    --resource-group "$vault_rg" \
+    --resource-type Microsoft.RecoveryServices/vaults \
+    $vault_sub_flag \
+    --query tags -o json) || fail "Could not read tags from Recovery Services vault ${vault_name}."
+
+  local tag_args=()
+  while IFS=$'\t' read -r tag_key tag_value; do
+    [[ -n "$tag_key" ]] && tag_args+=("${tag_key}=${tag_value}")
+  done < <(echo "$vault_tags_json" | jq -r '. + {purpose: "rsv staging storage account"} | to_entries[] | [.key, (.value | tostring)] | @tsv')
+  local tag_cli_args=()
+  if (( ${#tag_args[@]} > 0 )); then
+    tag_cli_args=(--tags "${tag_args[@]}")
+  fi
+
+  # shellcheck disable=SC2086
+  local existing_id
+  existing_id=$(az storage account show --name "$sa_name" -g "$rg" $sub_flag --query id -o tsv 2>/dev/null || echo "")
+
+  if [[ -n "$existing_id" ]]; then
+    log "Using existing staging storage account: ${sa_name} (${rg})" >&2
+    echo "$existing_id"
+    return 0
+  fi
+
+  # shellcheck disable=SC2086
+  local location
+  location=$(az group show --name "$rg" $sub_flag --query location -o tsv) || fail "Could not resolve location for resource group ${rg}."
+
+  if [[ "${dry_run,,}" == "true" ]]; then
+    log "[DRY RUN] Would create staging storage account: ${sa_name} in ${rg} (${location}, Standard_LRS) with ${#tag_args[@]} vault tag(s)" >&2
+    echo "$sa_name"
+    return 0
+  fi
+
+  log "Creating staging storage account: ${sa_name} in ${rg} (${location})..." >&2
+  # shellcheck disable=SC2086
+  az storage account create \
+    --name "$sa_name" \
+    --resource-group "$rg" \
+    --location "$location" \
+    --sku Standard_LRS \
+    --kind StorageV2 \
+    --min-tls-version TLS1_2 \
+    --allow-blob-public-access false \
+    "${tag_cli_args[@]}" \
+    $sub_flag \
+    --output none || fail "Failed to create staging storage account ${sa_name} in ${rg}."
+
+  # shellcheck disable=SC2086
+  local new_id
+  new_id=$(az storage account show --name "$sa_name" -g "$rg" $sub_flag --query id -o tsv)
+  log "Created staging storage account: ${sa_name}" >&2
+  echo "$new_id"
+}
+
+# ---------------------------------------------------------------------------
 # restore_replace_existing
 #
 # Replace Existing (OriginalLocation / in-place).
@@ -224,18 +363,21 @@ restore_replace_existing() {
   local source_rg="$5"
   local source_sub_flag="$6"
   local selected_rp="$7"
-  local staging_sa="$8"
-  local staging_sa_rg="$9"
-  local dry_run="${10}"
-  local timeout_minutes="${11}"
-  local poll_seconds="${12}"
+  local dry_run="$8"
+  local timeout_minutes="$9"
+  local poll_seconds="${10}"
 
   local start_time job_id job_status end_time
 
   log "=== Method C: Replace Existing (OriginalLocation) ==="
   log "Source VM:         ${source_vm} in ${source_rg}"
   log "Recovery point:    ${selected_rp}"
-  log "Staging account:   ${staging_sa} (${staging_sa_rg})"
+
+  local staging_sub_flag="$source_sub_flag"
+  [[ -z "$staging_sub_flag" ]] && staging_sub_flag="$vault_sub_flag"
+  local staging_sa_id
+  staging_sa_id=$(ensure_staging_storage_account "$vault_name" "$vault_rg" "$vault_sub_flag" "$source_rg" "$staging_sub_flag" "$dry_run")
+  log "Staging account:   ${staging_sa_id}"
 
   if [[ "${dry_run,,}" == "true" ]]; then
     log "[DRY RUN] Would execute:"
@@ -245,8 +387,7 @@ restore_replace_existing() {
     log "       --vault-name ${vault_name} -g ${vault_rg} ${vault_sub_flag} \\"
     log "       --container-name ${source_vm} --item-name ${source_vm} \\"
     log "       --rp-name ${selected_rp} \\"
-    log "       --storage-account ${staging_sa} \\"
-    log "       --storage-account-resource-group ${staging_sa_rg} \\"
+    log "       --storage-account ${staging_sa_id} \\"
     log "       --restore-mode OriginalLocation"
     log "  4. az vm start     --name ${source_vm} -g ${source_rg} ${source_sub_flag}"
     log "[DRY RUN] No changes made."
@@ -278,8 +419,7 @@ restore_replace_existing() {
     --container-name "$source_vm" \
     --item-name "$source_vm" \
     --rp-name "$selected_rp" \
-    --storage-account "$staging_sa" \
-    --storage-account-resource-group "$staging_sa_rg" \
+    --storage-account "$staging_sa_id" \
     --restore-mode OriginalLocation \
     -o json)
 
@@ -322,17 +462,15 @@ restore_create_new_vm() {
   # source_sub_flag intentionally omitted: AlternateLocation restore targets the
   # VM via vault container/item name — the source subscription flag is not used.
   local selected_rp="$6"
-  local staging_sa="$7"
-  local staging_sa_rg="$8"
-  local target_rg="${9}"
-  local target_sub_flag="${10}"
-  local target_vm_name="${11}"
-  local target_vnet_name="${12}"
-  local target_subnet_name="${13}"
-  local target_vnet_rg="${14}"
-  local dry_run="${15}"
-  local timeout_minutes="${16}"
-  local poll_seconds="${17}"
+  local target_rg="$7"
+  local target_sub_flag="$8"
+  local target_vm_name="$9"
+  local target_vnet_name="${10}"
+  local target_subnet_name="${11}"
+  local target_vnet_rg="${12}"
+  local dry_run="${13}"
+  local timeout_minutes="${14}"
+  local poll_seconds="${15}"
 
   local start_time job_id job_status end_time
 
@@ -342,7 +480,12 @@ restore_create_new_vm() {
   log "Target RG:         ${target_rg}"
   log "Target VM name:    ${target_vm_name}"
   log "Target VNet:       ${target_vnet_name} / ${target_subnet_name} (${target_vnet_rg})"
-  log "Staging account:   ${staging_sa} (${staging_sa_rg})"
+
+  local staging_sub_flag="$target_sub_flag"
+  [[ -z "$staging_sub_flag" ]] && staging_sub_flag="$vault_sub_flag"
+  local staging_sa_id
+  staging_sa_id=$(ensure_staging_storage_account "$vault_name" "$vault_rg" "$vault_sub_flag" "$target_rg" "$staging_sub_flag" "$dry_run")
+  log "Staging account:   ${staging_sa_id}"
 
   if [[ "${dry_run,,}" == "true" ]]; then
     log "[DRY RUN] Would execute:"
@@ -350,8 +493,7 @@ restore_create_new_vm() {
     log "    --vault-name ${vault_name} -g ${vault_rg} ${vault_sub_flag} \\"
     log "    --container-name ${source_vm} --item-name ${source_vm} \\"
     log "    --rp-name ${selected_rp} \\"
-    log "    --storage-account ${staging_sa} \\"
-    log "    --storage-account-resource-group ${staging_sa_rg} \\"
+    log "    --storage-account ${staging_sa_id} \\"
     log "    --restore-to-staging-storage-account true \\"
     log "    --target-resource-group ${target_rg} ${target_sub_flag} \\"
     log "    --target-vm-name ${target_vm_name} \\"
@@ -383,8 +525,7 @@ restore_create_new_vm() {
     --container-name "$source_vm" \
     --item-name "$source_vm" \
     --rp-name "$selected_rp" \
-    --storage-account "$staging_sa" \
-    --storage-account-resource-group "$staging_sa_rg" \
+    --storage-account "$staging_sa_id" \
     --restore-to-staging-storage-account true \
     --target-resource-group "$target_rg" \
     $target_sub_id_flag \
@@ -427,13 +568,11 @@ restore_disks_only() {
   # source_sub_flag intentionally omitted: disk-only restore targets the VM via
   # vault container/item name — the source subscription flag is not used.
   local selected_rp="$6"
-  local staging_sa="$7"
-  local staging_sa_rg="$8"
-  local target_rg="${9}"
-  local target_sub_flag="${10}"
-  local dry_run="${11}"
-  local timeout_minutes="${12}"
-  local poll_seconds="${13}"
+  local target_rg="$7"
+  local target_sub_flag="$8"
+  local dry_run="$9"
+  local timeout_minutes="${10}"
+  local poll_seconds="${11}"
 
   local start_time job_id job_status end_time
 
@@ -441,7 +580,12 @@ restore_disks_only() {
   log "Source VM:         ${source_vm} in ${source_rg}"
   log "Recovery point:    ${selected_rp}"
   log "Target RG:         ${target_rg}"
-  log "Staging account:   ${staging_sa} (${staging_sa_rg})"
+
+  local staging_sub_flag="$target_sub_flag"
+  [[ -z "$staging_sub_flag" ]] && staging_sub_flag="$vault_sub_flag"
+  local staging_sa_id
+  staging_sa_id=$(ensure_staging_storage_account "$vault_name" "$vault_rg" "$vault_sub_flag" "$target_rg" "$staging_sub_flag" "$dry_run")
+  log "Staging account:   ${staging_sa_id}"
 
   if [[ "${dry_run,,}" == "true" ]]; then
     log "[DRY RUN] Would execute:"
@@ -449,8 +593,7 @@ restore_disks_only() {
     log "    --vault-name ${vault_name} -g ${vault_rg} ${vault_sub_flag} \\"
     log "    --container-name ${source_vm} --item-name ${source_vm} \\"
     log "    --rp-name ${selected_rp} \\"
-    log "    --storage-account ${staging_sa} \\"
-    log "    --storage-account-resource-group ${staging_sa_rg} \\"
+    log "    --storage-account ${staging_sa_id} \\"
     log "    --restore-to-staging-storage-account true \\"
     log "    --target-resource-group ${target_rg} ${target_sub_flag}"
     log "[DRY RUN] No changes made."
@@ -478,8 +621,7 @@ restore_disks_only() {
     --container-name "$source_vm" \
     --item-name "$source_vm" \
     --rp-name "$selected_rp" \
-    --storage-account "$staging_sa" \
-    --storage-account-resource-group "$staging_sa_rg" \
+    --storage-account "$staging_sa_id" \
     --restore-to-staging-storage-account true \
     --target-resource-group "$target_rg" \
     $target_sub_id_flag \
@@ -495,7 +637,7 @@ restore_disks_only() {
   end_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   log "Restore complete. Managed disks now exist in ${target_rg}."
-  log "An ARM template has been written to the staging storage account: ${staging_sa}"
+  log "An ARM template has been written to the staging storage account: ${staging_sa_id}"
   warn "Delete the restored disks from ${target_rg} once verified — do not leave them running."
   warn "Clean up staging storage account blobs after use."
 
@@ -618,14 +760,6 @@ main() {
   local target_vnet_rg="${TARGET_VNET_RESOURCE_GROUP:-}"
   [[ "$target_vnet_rg" == "none" ]] && target_vnet_rg=""
 
-  # Method D does not use a staging storage account
-  local staging_sa="${STAGING_STORAGE_ACCOUNT:-}"
-  local staging_sa_rg="${STAGING_STORAGE_ACCOUNT_RG:-}"
-  if [[ "$restore_method" != "file-recovery" ]]; then
-    [[ -n "$staging_sa" ]] || fail "STAGING_STORAGE_ACCOUNT is required for ${restore_method}"
-    [[ -n "$staging_sa_rg" ]] || fail "STAGING_STORAGE_ACCOUNT_RG is required for ${restore_method}"
-  fi
-
   # Build optional subscription flags
   local vault_sub_flag=""
   [[ -n "$vault_subscription" ]] && vault_sub_flag="--subscription ${vault_subscription}"
@@ -691,7 +825,7 @@ main() {
       restore_replace_existing \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" "$source_sub_flag" \
-        "$selected_rp" "$staging_sa" "$staging_sa_rg" \
+        "$selected_rp" \
         "$dry_run" "$timeout_minutes" "$poll_seconds"
       ;;
 
@@ -702,7 +836,7 @@ main() {
       restore_create_new_vm \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" \
-        "$selected_rp" "$staging_sa" "$staging_sa_rg" \
+        "$selected_rp" \
         "$target_rg" "$target_sub_flag" "$target_vm_name" \
         "$target_vnet_name" "$target_subnet_name" "$target_vnet_rg" \
         "$dry_run" "$timeout_minutes" "$poll_seconds"
@@ -712,7 +846,7 @@ main() {
       restore_disks_only \
         "$vault_name" "$vault_rg" "$vault_sub_flag" \
         "$source_vm" "$source_rg" \
-        "$selected_rp" "$staging_sa" "$staging_sa_rg" \
+        "$selected_rp" \
         "$target_rg" "$target_sub_flag" \
         "$dry_run" "$timeout_minutes" "$poll_seconds"
       ;;

@@ -1,5 +1,9 @@
 name: Azure RSV VM Restore - CNP
 
+# wrapper for the Vault restore CLI functions which provides authorisation/
+# approval gating. If required, pipeline will deploy a 'staging' storage
+# account to the target sub to assist with restore process.
+
 trigger: none
 pr: none
 
@@ -7,6 +11,8 @@ parameters:
   - name: serviceConnection
     type: string
     default: CNP-VM-Restorations
+    # this needs contributor (at least Vault operator) 
+    # on the source vault and target sub
   - name: agentPool
     type: string
     default: hmcts-cftptl-agent-pool
@@ -54,22 +60,15 @@ parameters:
   - name: recoveryPointId
     type: string
     default: 'none'
-  # ISO-8601 UTC timestamp (e.g. '2026-05-29T14:00:00Z'). Leave as 'none' to
-  # restore from the most recent available recovery point.
+  # RFC 3339 timestamp (e.g. '2026-08-12T02:19:29Z'). Leave as 'none' to
+  # restore from the most recent available recovery point. Azure may return
+  # legacy recovery-point timestamps such as '12/08/2026, 02:19:29'; both forms
+  # are handled by the selection parser.
   # When provided, selects the latest recovery point at or before this time.
   # Provide this OR recoveryPointId, not both.
   - name: recoveryPointTimeUtc
     type: string
     default: 'none'
-  # Pre-provisioned staging storage account used during disk restore operations.
-  # Required for create-new-vm, restore-disks-only, replace-existing. Not used for file-recovery.
-  # Must match the storage account deployed by the azure-backup-vault Terraform module.
-  - name: stagingStorageAccount
-    type: string
-    default: 'cnpvaultrestorationsprod'
-  - name: stagingStorageAccountResourceGroup
-    type: string
-    default: 'mgmt-infra-prod-rg'
   # Target resource group for create-new-vm and restore-disks-only.
   # Leave as 'none' to use the source VM's resource group.
   - name: targetResourceGroup
@@ -143,8 +142,6 @@ stages:
               echo "vaultSubscription:            ${{ parameters.vaultSubscription }}"
               echo "recoveryPointId:              ${{ parameters.recoveryPointId }}"
               echo "recoveryPointTimeUtc:         ${{ parameters.recoveryPointTimeUtc }}"
-              echo "stagingStorageAccount:        ${{ parameters.stagingStorageAccount }}"
-              echo "stagingStorageAccountRG:      ${{ parameters.stagingStorageAccountResourceGroup }}"
               echo "targetResourceGroup:          ${{ parameters.targetResourceGroup }}"
               echo "targetSubscription:           ${{ parameters.targetSubscription }}"
               echo "targetVmName:                 ${{ parameters.targetVmName }}"
@@ -210,13 +207,54 @@ stages:
                   [[ -n "$SELECTED_RP" ]] || { echo "ERROR: Recovery point ${RECOVERY_POINT_ID} not found."; exit 1; }
                 elif [[ -n "${RECOVERY_POINT_TIME_UTC}" && "${RECOVERY_POINT_TIME_UTC}" != "none" ]]; then
                   SELECTED_RP=$(echo "$RECOVERY_POINTS" | jq -r --arg ts "${RECOVERY_POINT_TIME_UTC}" '
-                    map({name: .name, t: (.properties.recoveryPointTime | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)})
-                    | map(select(.t <= ($ts | fromdateiso8601)))
+                    def parse_timestamp:
+                      if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+                      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4}, [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%d/%m/%Y, %H:%M:%S") | mktime
+                      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%d/%m/%Y %H:%M:%S") | mktime
+                      elif test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$") then
+                        capture("^(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$") as $timestamp
+                        | ($timestamp.date | strptime("%Y-%m-%dT%H:%M:%S") | mktime) as $base
+                        | if $timestamp.zone == "Z" then
+                            $base
+                          else
+                            ($timestamp.zone | capture("^(?<sign>[+-])(?<hours>[0-9]{2}):(?<minutes>[0-9]{2})$")) as $offset
+                            | (($offset.hours | tonumber) * 3600 + ($offset.minutes | tonumber) * 60) as $offset_seconds
+                            | if $offset.sign == "+" then $base - $offset_seconds else $base + $offset_seconds end
+                          end
+                      else
+                        error("Unsupported timestamp format: \(.)")
+                      end;
+                    ($ts | parse_timestamp) as $requested_time
+                    | map({name: .name, t: (.properties.recoveryPointTime | parse_timestamp)})
+                    | map(select(.t <= $requested_time))
                     | sort_by(.t) | last | .name // empty')
                   [[ -n "$SELECTED_RP" ]] || { echo "ERROR: No recovery point found at or before ${RECOVERY_POINT_TIME_UTC}."; exit 1; }
                 else
                   SELECTED_RP=$(echo "$RECOVERY_POINTS" | jq -r '
-                    map({name: .name, t: (.properties.recoveryPointTime | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)})
+                    def parse_timestamp:
+                      if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+                      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4}, [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%d/%m/%Y, %H:%M:%S") | mktime
+                      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%d/%m/%Y %H:%M:%S") | mktime
+                      elif test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$") then
+                        capture("^(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$") as $timestamp
+                        | ($timestamp.date | strptime("%Y-%m-%dT%H:%M:%S") | mktime) as $base
+                        | if $timestamp.zone == "Z" then
+                            $base
+                          else
+                            ($timestamp.zone | capture("^(?<sign>[+-])(?<hours>[0-9]{2}):(?<minutes>[0-9]{2})$")) as $offset
+                            | (($offset.hours | tonumber) * 3600 + ($offset.minutes | tonumber) * 60) as $offset_seconds
+                            | if $offset.sign == "+" then $base - $offset_seconds else $base + $offset_seconds end
+                          end
+                      else
+                        error("Unsupported timestamp format: \(.)")
+                      end;
+                    map({name: .name, t: (.properties.recoveryPointTime | parse_timestamp)})
                     | sort_by(.t) | last | .name // empty')
                   [[ -n "$SELECTED_RP" ]] || { echo "ERROR: No recovery points found for VM ${SOURCE_VM_NAME}."; exit 1; }
                 fi
@@ -277,6 +315,19 @@ stages:
                     scriptLocation: inlineScript
                     inlineScript: |
                       set -euo pipefail
+                      CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv)
+                      VAULT_SUBSCRIPTION_ID="$CURRENT_SUBSCRIPTION"
+                      if [[ -n "${VAULT_SUBSCRIPTION:-}" && "${VAULT_SUBSCRIPTION}" != "none" ]]; then
+                        VAULT_SUBSCRIPTION_ID=$(az account show --subscription "${VAULT_SUBSCRIPTION}" --query id -o tsv)
+                        export VAULT_SUBSCRIPTION="$VAULT_SUBSCRIPTION_ID"
+                      fi
+                      if [[ -n "${TARGET_SUBSCRIPTION:-}" && "${TARGET_SUBSCRIPTION}" != "none" ]]; then
+                        TARGET_SUBSCRIPTION=$(az account show --subscription "${TARGET_SUBSCRIPTION}" --query id -o tsv)
+                        if [[ "$TARGET_SUBSCRIPTION" == "$VAULT_SUBSCRIPTION_ID" ]]; then
+                          TARGET_SUBSCRIPTION="none"
+                        fi
+                        export TARGET_SUBSCRIPTION
+                      fi
                       chmod +x scripts/restore-vm-from-rsv.sh
                       ./scripts/restore-vm-from-rsv.sh
                   env:
@@ -289,8 +340,6 @@ stages:
                     RESTORE_METHOD: ${{ parameters.restoreMethod }}
                     RECOVERY_POINT_ID: $(selectedRecoveryPointId)
                     RECOVERY_POINT_TIME_UTC: ${{ parameters.recoveryPointTimeUtc }}
-                    STAGING_STORAGE_ACCOUNT: ${{ parameters.stagingStorageAccount }}
-                    STAGING_STORAGE_ACCOUNT_RG: ${{ parameters.stagingStorageAccountResourceGroup }}
                     TARGET_RESOURCE_GROUP: ${{ parameters.targetResourceGroup }}
                     TARGET_SUBSCRIPTION: ${{ parameters.targetSubscription }}
                     TARGET_VM_NAME: $(resolvedTargetVmName)
