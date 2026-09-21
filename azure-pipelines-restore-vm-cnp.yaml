@@ -60,10 +60,12 @@ parameters:
   - name: recoveryPointId
     type: string
     default: 'none'
-  # ISO-8601 UTC timestamp (e.g. '2026-08-12T02:19:29Z'). Leave as 'none' to
-  # restore from the most recent available recovery point.
+  # RFC 3339 timestamp (e.g. '2026-08-12T02:19:29Z'). Leave as 'none' to
+  # restore from the most recent available recovery point. Azure may return
+  # legacy recovery-point timestamps such as '12/08/2026, 02:19:29'; both forms
+  # are handled by the selection parser.
   # When provided, selects the latest recovery point at or before this time.
-  # Provide this OR recoveryPointId, not both.  12/08/2026, 02:19:29
+  # Provide this OR recoveryPointId, not both.
   - name: recoveryPointTimeUtc
     type: string
     default: 'none'
@@ -208,10 +210,22 @@ stages:
                     def parse_timestamp:
                       if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
                         strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+                      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4}, [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%d/%m/%Y, %H:%M:%S") | mktime
                       elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
-                        strptime("%m/%d/%Y %H:%M:%S") | mktime
+                        strptime("%d/%m/%Y %H:%M:%S") | mktime
+                      elif test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$") then
+                        capture("^(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$") as $timestamp
+                        | ($timestamp.date | strptime("%Y-%m-%dT%H:%M:%S") | mktime) as $base
+                        | if $timestamp.zone == "Z" then
+                            $base
+                          else
+                            ($timestamp.zone | capture("^(?<sign>[+-])(?<hours>[0-9]{2}):(?<minutes>[0-9]{2})$")) as $offset
+                            | (($offset.hours | tonumber) * 3600 + ($offset.minutes | tonumber) * 60) as $offset_seconds
+                            | if $offset.sign == "+" then $base - $offset_seconds else $base + $offset_seconds end
+                          end
                       else
-                        gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601
+                        error("Unsupported timestamp format: \(.)")
                       end;
                     ($ts | parse_timestamp) as $requested_time
                     | map({name: .name, t: (.properties.recoveryPointTime | parse_timestamp)})
@@ -220,7 +234,27 @@ stages:
                   [[ -n "$SELECTED_RP" ]] || { echo "ERROR: No recovery point found at or before ${RECOVERY_POINT_TIME_UTC}."; exit 1; }
                 else
                   SELECTED_RP=$(echo "$RECOVERY_POINTS" | jq -r '
-                    map({name: .name, t: (.properties.recoveryPointTime | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)})
+                    def parse_timestamp:
+                      if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+                      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4}, [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%d/%m/%Y, %H:%M:%S") | mktime
+                      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+                        strptime("%d/%m/%Y %H:%M:%S") | mktime
+                      elif test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$") then
+                        capture("^(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$") as $timestamp
+                        | ($timestamp.date | strptime("%Y-%m-%dT%H:%M:%S") | mktime) as $base
+                        | if $timestamp.zone == "Z" then
+                            $base
+                          else
+                            ($timestamp.zone | capture("^(?<sign>[+-])(?<hours>[0-9]{2}):(?<minutes>[0-9]{2})$")) as $offset
+                            | (($offset.hours | tonumber) * 3600 + ($offset.minutes | tonumber) * 60) as $offset_seconds
+                            | if $offset.sign == "+" then $base - $offset_seconds else $base + $offset_seconds end
+                          end
+                      else
+                        error("Unsupported timestamp format: \(.)")
+                      end;
+                    map({name: .name, t: (.properties.recoveryPointTime | parse_timestamp)})
                     | sort_by(.t) | last | .name // empty')
                   [[ -n "$SELECTED_RP" ]] || { echo "ERROR: No recovery points found for VM ${SOURCE_VM_NAME}."; exit 1; }
                 fi

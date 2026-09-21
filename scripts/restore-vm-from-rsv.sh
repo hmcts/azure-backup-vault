@@ -32,12 +32,18 @@ set -euo pipefail
 #   group, so repeat restores reuse the same account instead of creating new
 #   ones. Azure Backup requires the staging account to be in the vault
 #   subscription or the protected VM's subscription, which this satisfies.
+#   tech debt:
+#   - this isn't as locked down as it should be but functions to get the restore going.
+#   - recovery managed identity will need permissions on this as well, usually has enough
+#       from getting contributor on the target sub for the original target
+#
 #
 # Optional environment variables:
 #   VAULT_SUBSCRIPTION            RSV subscription; defaults to current CLI context
 #   SOURCE_SUBSCRIPTION           VM subscription; defaults to current CLI context
 #   RECOVERY_POINT_ID             Pin to exact RP name; default: latest available
-#   RECOVERY_POINT_TIME_UTC       Pin to RP at or before this ISO-8601 UTC time
+#   RECOVERY_POINT_TIME_UTC       Pin to RP at or before this RFC 3339 time
+#                                 (for example, 2026-08-12T02:19:29Z)
 #   RESTORE_TIMEOUT_MINUTES       Job timeout; default 240
 #   POLL_SECONDS                  Polling interval; default 30
 #
@@ -98,10 +104,22 @@ select_recovery_point() {
       def parse_timestamp:
         if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
           strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+        elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4}, [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+          strptime("%d/%m/%Y, %H:%M:%S") | mktime
         elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
-          strptime("%m/%d/%Y %H:%M:%S") | mktime
+          strptime("%d/%m/%Y %H:%M:%S") | mktime
+        elif test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$") then
+          capture("^(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$") as $timestamp
+          | ($timestamp.date | strptime("%Y-%m-%dT%H:%M:%S") | mktime) as $base
+          | if $timestamp.zone == "Z" then
+              $base
+            else
+              ($timestamp.zone | capture("^(?<sign>[+-])(?<hours>[0-9]{2}):(?<minutes>[0-9]{2})$")) as $offset
+              | (($offset.hours | tonumber) * 3600 + ($offset.minutes | tonumber) * 60) as $offset_seconds
+              | if $offset.sign == "+" then $base - $offset_seconds else $base + $offset_seconds end
+            end
         else
-          gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601
+          error("Unsupported timestamp format: \(.)")
         end;
       ($ts | parse_timestamp) as $requested_time
       | map({
@@ -118,9 +136,29 @@ select_recovery_point() {
 
   # Default: most recent recovery point
   echo "$recovery_points_json" | jq -r '
+    def parse_timestamp:
+      if test("^[0-9]{4}/[0-9]{2}/[0-9]{2}/ [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+        strptime("%Y/%m/%d/ %H:%M:%S") | mktime
+      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4}, [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+        strptime("%d/%m/%Y, %H:%M:%S") | mktime
+      elif test("^[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}$") then
+        strptime("%d/%m/%Y %H:%M:%S") | mktime
+      elif test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$") then
+        capture("^(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$") as $timestamp
+        | ($timestamp.date | strptime("%Y-%m-%dT%H:%M:%S") | mktime) as $base
+        | if $timestamp.zone == "Z" then
+            $base
+          else
+            ($timestamp.zone | capture("^(?<sign>[+-])(?<hours>[0-9]{2}):(?<minutes>[0-9]{2})$")) as $offset
+            | (($offset.hours | tonumber) * 3600 + ($offset.minutes | tonumber) * 60) as $offset_seconds
+            | if $offset.sign == "+" then $base - $offset_seconds else $base + $offset_seconds end
+          end
+      else
+        error("Unsupported timestamp format: \(.)")
+      end;
     map({
       name: .name,
-      t: (.properties.recoveryPointTime | gsub("\\.[0-9]+"; "") | gsub("\\+[0-9:]+$"; "Z") | fromdateiso8601)
+      t: (.properties.recoveryPointTime | parse_timestamp)
     })
     | sort_by(.t)
     | last
