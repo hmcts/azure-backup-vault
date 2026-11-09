@@ -16,25 +16,71 @@ resources:
 parameters:
   - name: tfversion
     default: 1.14.4
+  - name: agentPool
+    values:
+      - ubuntu-ado-agents-mpd
+    default: "ubuntu-ado-agents-mpd"
   - name: action
     values:
       - plan
       - apply
     default: plan
+  - name: env
+    displayName: "Environment"
+    values:
+      - prod
+    default: prod
+  - name: platform
+    values:
+      - live
+    default: "live"
+  - name: environment
+    values:
+      - cpp-live
+    default: "cpp-live"
   - name: targetResources
     default: null
 
+variables:
+- template: azure-pipeline-variables/${{ parameters.platform }}.yml
+
 stages:
-  - template: pipelines/terraform-plan-and-apply.yaml@cppAzureDevOpsTemplates
-    parameters:
-      planEnvironments:
-        - platform: live
-          environments:
-            - prod
-      tfversion: ${{ parameters.tfversion }}
-      targetResources: ${{ parameters.targetResources }}
-      dir: components/cpp
-      tfvars: ../../environments/prod/cpp.tfvars
-      terraformWorkspaceName: cpp-prod
-      planStageCondition: in(variables['Build.Reason'], 'PullRequest', 'Manual')
-      applyStageCondition: and(eq(variables['Build.Reason'], 'Manual'), eq('${{ parameters.action }}', 'apply'))
+  - stage: precommit
+    pool:
+      name: ${{ parameters.agentPool }}
+    jobs:
+      - job: pre
+        condition: eq(variables['Build.Reason'], 'PullRequest')
+        steps:
+          - template: steps/terraform/terraform-precommit.yaml@cppAzureDevOpsTemplates
+            parameters:
+              tfversion: ${{ parameters.tfversion }}
+
+  - ${{ if eq(variables['Build.Reason'], 'Manual') }}:
+    - template: stages/terraform-ws-plan.yaml@cppAzureDevOpsTemplates
+      parameters:
+        tfversion: ${{ parameters.tfversion }}
+        azureServiceConnection: ${{ variables.azureServiceConnection }}
+        vaultAdminCredentialsVarGroup: ${{ variables.vaultAdminCredentialsVarGroup }}
+        platform: ${{ parameters.platform }}
+        environment: ${{ parameters.environment }}
+        agentPool: ${{ parameters.agentPool }}
+        targetResources: ${{ parameters.targetResources }}
+        dir: components/cpp
+        tfvars: ../../environments/${{ parameters.env }}/cpp.tfvars
+        terraformWorkspaceName: cpp-${{ parameters.env }}
+        stageDisplayNamePrefix: CPP
+
+  - ${{ if and(eq(variables['Build.Reason'], 'Manual'), eq(parameters.action, 'apply')) }}:
+    - template: stages/terraform-ws-apply.yaml@cppAzureDevOpsTemplates
+      parameters:
+        tfversion: ${{ parameters.tfversion }}
+        azureServiceConnection: ${{ variables.azureServiceConnection }}
+        vaultAdminCredentialsVarGroup: ${{ variables.vaultAdminCredentialsVarGroup }}
+        platform: ${{ parameters.platform }}
+        environment: ${{ parameters.environment }}
+        agentPool: ${{ parameters.agentPool }}
+        dir: components/cpp
+        tfvars: ../../environments/${{ parameters.env }}/cpp.tfvars
+        terraformWorkspaceName: cpp-${{ parameters.env }}
+        stageDisplayNamePrefix: CPP
