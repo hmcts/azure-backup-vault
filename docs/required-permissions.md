@@ -42,6 +42,7 @@ Pre-existing Terraform-managed assignments — not set by the pipeline:
 |---|---|---|
 | `Storage Blob Data Contributor` | Restore storage account | Write backup blobs to the container during the vault-to-storage transfer |
 | `PostgreSQL Flexible Server Long Term Retention Backup Role` | Source PostgreSQL Flexible Server | Read the source server's backup data to fulfil the restore job |
+| `Storage Account Backup Contributor` | Each storage account listed in `environments/prod/cpp-storage-account-backups.yaml` | Allow the vault to back up onboarded storage accounts (CPP) |
 
 ---
 
