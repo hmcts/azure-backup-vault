@@ -32,6 +32,12 @@ locals {
     ]
   }
 
+  # Storage accounts onboarded to the backup vault, keyed by account name.
+  # Empty when no onboarding file is configured for the environment.
+  storage_backup_targets = var.storage_account_backup_onboarding_file == null ? {} : {
+    for sa in yamldecode(file("${path.module}/${var.storage_account_backup_onboarding_file}")) : sa.name => sa
+  }
+
   # Common tags for HMCTS resources
   common_tags = {
     for k, v in {

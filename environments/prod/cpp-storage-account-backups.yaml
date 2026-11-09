@@ -1,0 +1,71 @@
+# Storage accounts onboarded to the CPP backup vault.
+#
+# Every entry grants the vault's system-assigned managed identity the
+# "Storage Account Backup Contributor" role on that account, regardless of
+# backup-enabled. Backup enrolment is handled separately.
+#
+# Fields:
+#   name:           storage account name
+#   resource_group: resource group of the storage account, exact casing as in Azure
+#   type:           blob | adls | file | ...
+#   backup-enabled: true to enrol the account for backup (false by default)
+#   policy:         backup policy name, set when enrolling
+#   containers:     containers to back up, or * for all, set when enrolling
+
+- name: saprdforensicaudit2
+  resource_group: rg-prd-ccm01-forensicauditreporting
+  type: adls
+  backup-enabled: false
+  policy: null
+  containers: []
+
+# Remaining accounts: uncomment once RBAC is confirmed on the test account above.
+
+# - name: saprdccm01alfresco
+#   resource_group: RG-PRD-CCM-01
+#   type: adls
+#   backup-enabled: false
+#   policy: null
+#   containers: []
+
+# - name: saprdccm01misdp
+#   resource_group: RG-PRD-SVC-01
+#   type: adls
+#   backup-enabled: false
+#   policy: null
+#   containers: []
+
+# - name: saprdccm01mislivereport
+#   resource_group: RG-PRD-SVC-01
+#   type: adls
+#   backup-enabled: false
+#   policy: null
+#   containers: []
+
+# - name: saprdcourtlistpublisher
+#   resource_group: RG-PRD-SVC-01
+#   type: adls
+#   backup-enabled: false
+#   policy: null
+#   containers: []
+
+# - name: saprdforensicaudit
+#   resource_group: RG-PRD-CCM-DATALAKE
+#   type: adls
+#   backup-enabled: false
+#   policy: null
+#   containers: []
+
+# - name: sampdappgatewaycerts
+#   resource_group: RG-MLV-INT-01
+#   type: adls
+#   backup-enabled: false
+#   policy: null
+#   containers: []
+
+# - name: sampdpgreports
+#   resource_group: RG-PRD-SVC-01
+#   type: adls
+#   backup-enabled: false
+#   policy: null
+#   containers: []

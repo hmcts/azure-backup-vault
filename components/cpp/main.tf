@@ -118,4 +118,15 @@ resource "azurerm_role_assignment" "ado_service_connection_bv" {
   principal_id         = var.ado_service_connection_object_id
 }
 
+# Grant the backup vault's managed identity access to each onboarded storage
+# account. Applies to every entry in the onboarding file, whether or not
+# backup-enabled is set, so RBAC is in place before enrolment.
+resource "azurerm_role_assignment" "backup_vault_storage_account_backup_contributor" {
+  for_each = local.storage_backup_targets
+
+  scope                = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/${each.value.resource_group}/providers/Microsoft.Storage/storageAccounts/${each.value.name}"
+  role_definition_name = "Storage Account Backup Contributor"
+  principal_id         = module.backup_vaults["cpp-backup-vault"].backup_vault_principal_id
+}
+
 

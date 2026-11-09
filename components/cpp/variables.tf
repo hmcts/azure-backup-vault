@@ -90,6 +90,12 @@ variable "ado_service_connection_object_id" {
   default     = null
 }
 
+variable "storage_account_backup_onboarding_file" {
+  type        = string
+  description = "Path, relative to this component, of the YAML file listing storage accounts onboarded to the backup vault. No accounts are onboarded when null."
+  default     = null
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # OPTIONAL VARIABLES - Common HMCTS Tags
 # ---------------------------------------------------------------------------------------------------------------------
