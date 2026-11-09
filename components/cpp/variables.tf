@@ -47,8 +47,8 @@ variable "backup_vaults" {
     crit4_5_yearly_retention_duration  = optional(string, "P1Y")
 
     # ADLS Policy Schedules (retention is shared with the crit4_5 / test settings above)
-    adls_crit4_5_backup_schedule = optional(string, "R/2024-01-07T02:00:00+00:00/P1D")
-    adls_test_backup_schedule    = optional(string, "R/2024-01-07T02:00:00+00:00/P1D")
+    adls_crit4_5_backup_schedule = optional(string, "R/2026-11-09T02:00:00+00:00/P1D")
+    adls_test_backup_schedule    = optional(string, "R/2026-11-09T02:00:00+00:00/P1D")
 
     # RBAC - Role assignments for the vault's managed identity
     role_assignments = optional(map(object({
