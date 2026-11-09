@@ -18,7 +18,7 @@ module "tags" {
 module "backup_vaults" {
   for_each = local.backup_vaults
 
-  source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=main"
+  source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=feat/adls-backup-policies"
 
   name                = each.key
   location            = coalesce(each.value.location, var.location)

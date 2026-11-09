@@ -13,7 +13,7 @@ resource "azurerm_resource_group" "vaults" {
 module "backup_vaults" {
   for_each = var.backup_vaults
 
-  source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=main"
+  source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=feat/adls-backup-policies"
 
   name                = each.key
   resource_group_name = azurerm_resource_group.vaults.name
