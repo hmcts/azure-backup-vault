@@ -19,53 +19,51 @@
   policy: null
   containers: []
 
-# Remaining accounts: uncomment once RBAC is confirmed on the test account above.
+- name: saprdccm01alfresco
+  resource_group: RG-PRD-CCM-01
+  type: adls
+  backup-enabled: false
+  policy: null
+  containers: []
 
-# - name: saprdccm01alfresco
-#   resource_group: RG-PRD-CCM-01
-#   type: adls
-#   backup-enabled: false
-#   policy: null
-#   containers: []
+- name: saprdccm01misdp
+  resource_group: RG-PRD-SVC-01
+  type: adls
+  backup-enabled: false
+  policy: null
+  containers: []
 
-# - name: saprdccm01misdp
-#   resource_group: RG-PRD-SVC-01
-#   type: adls
-#   backup-enabled: false
-#   policy: null
-#   containers: []
+- name: saprdccm01mislivereport
+  resource_group: RG-PRD-SVC-01
+  type: adls
+  backup-enabled: false
+  policy: null
+  containers: []
 
-# - name: saprdccm01mislivereport
-#   resource_group: RG-PRD-SVC-01
-#   type: adls
-#   backup-enabled: false
-#   policy: null
-#   containers: []
+- name: saprdcourtlistpublisher
+  resource_group: RG-PRD-SVC-01
+  type: adls
+  backup-enabled: false
+  policy: null
+  containers: []
 
-# - name: saprdcourtlistpublisher
-#   resource_group: RG-PRD-SVC-01
-#   type: adls
-#   backup-enabled: false
-#   policy: null
-#   containers: []
+- name: saprdforensicaudit
+  resource_group: RG-PRD-CCM-DATALAKE
+  type: adls
+  backup-enabled: false
+  policy: null
+  containers: []
 
-# - name: saprdforensicaudit
-#   resource_group: RG-PRD-CCM-DATALAKE
-#   type: adls
-#   backup-enabled: false
-#   policy: null
-#   containers: []
+- name: sampdappgatewaycerts
+  resource_group: RG-MLV-INT-01
+  type: adls
+  backup-enabled: false
+  policy: null
+  containers: []
 
-# - name: sampdappgatewaycerts
-#   resource_group: RG-MLV-INT-01
-#   type: adls
-#   backup-enabled: false
-#   policy: null
-#   containers: []
-
-# - name: sampdpgreports
-#   resource_group: RG-PRD-SVC-01
-#   type: adls
-#   backup-enabled: false
-#   policy: null
-#   containers: []
+- name: sampdpgreports
+  resource_group: RG-PRD-SVC-01
+  type: adls
+  backup-enabled: false
+  policy: null
+  containers: []
