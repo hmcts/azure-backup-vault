@@ -60,13 +60,6 @@ resource "azurerm_role_assignment" "jenkins_prod_mi_contributor_cnp_vault" {
   principal_id         = data.azurerm_user_assigned_identity.jenkins_prod_mi[0].principal_id
 }
 
-# Adopt pre-existing role assignment into state (prod only) to avoid RoleAssignmentExists 409
-import {
-  for_each = var.env == "prod" ? toset(["prod"]) : toset([])
-  to       = azurerm_role_assignment.jenkins_prod_mi_contributor_cnp_vault[0]
-  id       = "/subscriptions/8999dec3-0104-4a27-94ee-6588559729d1/resourceGroups/mgmt-infra-prod-rg/providers/Microsoft.DataProtection/backupVaults/cnp-backup-vault/providers/Microsoft.Authorization/roleAssignments/208e4ae0-b349-4ad9-b2b2-cd5823ecb494"
-}
-
 # Module call to create storage accounts for backup restoration
 module "restore_storage_account" {
   for_each = local.storage_accounts
