@@ -36,6 +36,9 @@ module "backup_vaults" {
   enable_blob_crit4_5_policy       = try(each.value.enable_blob_crit4_5_policy, false)
   enable_blob_test_policy          = try(each.value.enable_blob_test_policy, false)
 
+  blob_crit4_5_backup_schedule = try(each.value.blob_crit4_5_backup_schedule, "R/2026-11-09T02:00:00+00:00/P1D")
+  blob_test_backup_schedule    = try(each.value.blob_test_backup_schedule, "R/2026-11-09T03:00:00+00:00/P1D")
+
   crit4_5_backup_schedule            = try(each.value.crit4_5_backup_schedule, "R/2024-01-07T02:00:00+00:00/P1W")
   crit4_5_timezone                   = try(each.value.crit4_5_timezone, "UTC")
   crit4_5_default_retention_duration = try(each.value.crit4_5_default_retention_duration, "P56D")
