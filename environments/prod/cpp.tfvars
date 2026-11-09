@@ -16,6 +16,8 @@ backup_vaults = {
 
     enable_postgresql_crit4_5_policy   = true
     enable_postgresql_test_policy      = true
+    enable_adls_crit4_5_policy         = true # ADLS policy, same retention as postgresql-crit4-5
+    enable_adls_test_policy            = true # ADLS policy, 7 day retention for testing
     crit4_5_enable_extended_retention  = true
     crit4_5_weekly_retention_duration  = "P56D"
     crit4_5_monthly_retention_duration = "P2M"
