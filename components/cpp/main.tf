@@ -13,7 +13,7 @@ resource "azurerm_resource_group" "vaults" {
 module "backup_vaults" {
   for_each = var.backup_vaults
 
-  source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=main"
+  source = "git::https://github.com/hmcts/module-terraform-azurerm-backup-vault.git?ref=add-blob-backup-policy"
 
   name                = each.key
   resource_group_name = azurerm_resource_group.vaults.name
@@ -33,6 +33,8 @@ module "backup_vaults" {
   enable_postgresql_test_policy    = try(each.value.enable_postgresql_test_policy, true)
   enable_adls_crit4_5_policy       = try(each.value.enable_adls_crit4_5_policy, false)
   enable_adls_test_policy          = try(each.value.enable_adls_test_policy, false)
+  enable_blob_crit4_5_policy       = try(each.value.enable_blob_crit4_5_policy, false)
+  enable_blob_test_policy          = try(each.value.enable_blob_test_policy, false)
 
   crit4_5_backup_schedule            = try(each.value.crit4_5_backup_schedule, "R/2024-01-07T02:00:00+00:00/P1W")
   crit4_5_timezone                   = try(each.value.crit4_5_timezone, "UTC")
