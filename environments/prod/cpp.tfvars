@@ -34,10 +34,6 @@ backup_vaults = {
         scope                = "/subscriptions/9ab65d81-930d-4cc0-a93d-367e14676bc0/resourceGroups/RG-PRX-CCM-01"
         role_definition_name = "Reader"
       }
-      "reader-RG-MPD-INT-01" = {
-        scope                = "/subscriptions/9ab65d81-930d-4cc0-a93d-367e14676bc0/resourceGroups/RG-MPD-INT-01"
-        role_definition_name = "Reader"
-      }
     }
   }
 }
