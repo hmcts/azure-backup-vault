@@ -12,7 +12,6 @@ backup_vaults = {
     cross_region_restore_enabled = true
     soft_delete                  = "Off"
     retention_duration_in_days   = 14
-
     enable_postgresql_crit4_5_policy   = true
     enable_postgresql_test_policy      = false
     enable_adls_crit4_5_policy         = true # ADLS policy, same retention as postgresql-crit4-5
