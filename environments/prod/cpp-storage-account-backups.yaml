@@ -24,7 +24,7 @@
 - name: saprpbkpadlstest01
   resource_group: RG-PRP-SVC-01
   type: adls
-  backup-enabled: false
+  backup-enabled: true
   policy: adls-test
   containers:
     - backup-test-01
