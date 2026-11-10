@@ -132,7 +132,7 @@ resource "azurerm_role_assignment" "ado_service_connection_bv" {
 resource "azurerm_role_assignment" "backup_vault_storage_account_backup_contributor" {
   for_each = local.storage_backup_targets
 
-  scope                = data.azurerm_storage_account.backup_targets[each.key].id
+  scope                = data.azurerm_storage_account.storage_backup_targets[each.key].id
   role_definition_name = "Storage Account Backup Contributor"
   principal_id         = module.backup_vaults["cpp-backup-vault"].backup_vault_principal_id
 }
@@ -141,7 +141,7 @@ resource "azurerm_role_assignment" "backup_vault_storage_account_backup_contribu
 data "azurerm_storage_containers" "adls_backup_all" {
   for_each = { for k, sa in local.adls_backup_instances : k => sa if contains(try(sa.containers, []), "*") }
 
-  storage_account_id = data.azurerm_storage_account.backup_targets[each.key].id
+  storage_account_id = data.azurerm_storage_account.storage_backup_targets[each.key].id
 }
 
 # Enrol ADLS storage accounts in cpp-backup-vault. Only entries with type adls and
@@ -152,13 +152,13 @@ data "azurerm_storage_containers" "adls_backup_all" {
 # a plan from destroying or replacing an instance, for example if an entry is
 # removed or set back to backup-enabled: false. To retire one, stop protection
 # (retain data) and remove it from state with terraform state rm.
-resource "azurerm_data_protection_backup_instance_data_lake_storage" "this" {
+resource "azurerm_data_protection_backup_instance_data_lake_storage" "adls" {
   for_each = local.adls_backup_instances
 
   name                               = "${each.key}-adls-backup-instance"
   location                           = var.location
   data_protection_backup_vault_id    = module.backup_vaults["cpp-backup-vault"].backup_vault_id
-  storage_account_id                 = data.azurerm_storage_account.backup_targets[each.key].id
+  storage_account_id                 = data.azurerm_storage_account.storage_backup_targets[each.key].id
   backup_policy_data_lake_storage_id = local.adls_backup_policy_ids[each.value.policy]
   storage_container_names = (
     contains(each.value.containers, "*")

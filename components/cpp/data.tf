@@ -8,9 +8,9 @@ data "azurerm_subnet" "storage_account_subnets" {
   resource_group_name  = each.value.resource_group_name
 }
 
-# Storage accounts onboarded to the backup vault, looked up by name and resource
+# All storage accounts in the onboarding file (every type), looked up by name and resource
 # group from the onboarding file. Plan fails if an account in the file doesn't exist.
-data "azurerm_storage_account" "backup_targets" {
+data "azurerm_storage_account" "storage_backup_targets" {
   for_each = local.storage_backup_targets
 
   name                = each.value.name
