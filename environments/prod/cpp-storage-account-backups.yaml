@@ -208,13 +208,6 @@
   policy: null
   containers: []
 
-- name: saprdidam01
-  resource_group: RG-PRD-IDM1-OPS-01
-  type: blob
-  backup-enabled: false
-  policy: null
-  containers: []
-
 - name: saprdlargefiles
   resource_group: RG-PRD-LARGEFILES
   type: blob
