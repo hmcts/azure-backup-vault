@@ -38,6 +38,21 @@ locals {
     for sa in yamldecode(file("${path.module}/${var.storage_account_backup_onboarding_file}")) : sa.name => sa
   }
 
+  # ADLS accounts to enrol: type adls with backup-enabled set to true.
+  adls_backup_instances = {
+    for k, sa in local.storage_backup_targets : k => sa
+    if try(sa.type, "") == "adls" && try(sa["backup-enabled"], false) == true
+  }
+
+  # ADLS backup policies in cpp-backup-vault, keyed by policy name (e.g. adls-test),
+  # so entries in the onboarding file can refer to a policy by name.
+  adls_backup_policy_ids = {
+    for p in [
+      [module.backup_vaults["cpp-backup-vault"].adls_crit4_5_policy_name, module.backup_vaults["cpp-backup-vault"].adls_crit4_5_policy_id],
+      [module.backup_vaults["cpp-backup-vault"].adls_test_policy_name, module.backup_vaults["cpp-backup-vault"].adls_test_policy_id],
+    ] : p[0] => p[1] if p[0] != null
+  }
+
   # Common tags for HMCTS resources
   common_tags = {
     for k, v in {
