@@ -38,12 +38,6 @@ locals {
     for sa in yamldecode(file("${path.module}/${var.storage_account_backup_onboarding_file}")) : sa.name => sa
   }
 
-  # ARM ID of each onboarded storage account, built from the onboarding file.
-  storage_backup_target_ids = {
-    for k, sa in local.storage_backup_targets :
-    k => "/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/${sa.resource_group}/providers/Microsoft.Storage/storageAccounts/${sa.name}"
-  }
-
   # ADLS accounts to enrol: type adls with backup-enabled set to true.
   adls_backup_instances = {
     for k, sa in local.storage_backup_targets : k => sa

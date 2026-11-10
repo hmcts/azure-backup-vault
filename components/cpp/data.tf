@@ -1,5 +1,3 @@
-data "azurerm_client_config" "current" {}
-
 # Resolves all subnet references declared in the storage_accounts variable.
 # The flat map is built in locals.tf from the per-account virtual_network_subnets lists.
 data "azurerm_subnet" "storage_account_subnets" {
@@ -8,4 +6,13 @@ data "azurerm_subnet" "storage_account_subnets" {
   name                 = each.value.name
   virtual_network_name = each.value.virtual_network_name
   resource_group_name  = each.value.resource_group_name
+}
+
+# Storage accounts onboarded to the backup vault, looked up by name and resource
+# group from the onboarding file. Plan fails if an account in the file doesn't exist.
+data "azurerm_storage_account" "backup_targets" {
+  for_each = local.storage_backup_targets
+
+  name                = each.value.name
+  resource_group_name = each.value.resource_group
 }
