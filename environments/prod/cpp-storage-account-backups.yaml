@@ -8,9 +8,38 @@
 #   name:           storage account name
 #   resource_group: resource group of the storage account, exact casing as in Azure
 #   type:           blob | adls | file | ...
-#   backup-enabled: true to enrol the account for backup (false by default)
-#   policy:         backup policy name, set when enrolling
-#   containers:     containers to back up, or * for all, set when enrolling
+#   backup-enabled: true to enrol the account for backup (false by default).
+#                   Currently supported for type adls only. Enrolment is effectively
+#                   permanent: the vault is immutable and locked.
+#   policy:         backup policy name, e.g. adls-test or adls-crit4-5
+#   containers:     containers to back up, or ["*"] for all (quote the *, YAML
+#                   treats a bare * as an alias)
+#
+# Add an account with backup-enabled: false first and apply, so the role is in place
+# (it can take up to 30 minutes to take effect) before enrolling it.
+
+# --- ADLS backup restore test (PRP, temporary) ------------------------------------
+
+# Test source account, enrolled with the 7-day adls-test policy.
+- name: saprpbkpadlstest01
+  resource_group: RG-PRP-SVC-01
+  type: adls
+  backup-enabled: false
+  policy: adls-test
+  containers:
+    - backup-test-01
+    - backup-test-02
+
+# Restore target for the test above. Never enrol: it only needs the role so the vault
+# can restore into it.
+- name: saprpadlstestrestore01
+  resource_group: RG-PRP-SVC-01
+  type: adls
+  backup-enabled: false
+  policy: null
+  containers: []
+
+# --- Production -------------------------------------------------------------------
 
 - name: saprdforensicaudit2
   resource_group: rg-prd-ccm01-forensicauditreporting

@@ -132,9 +132,58 @@ resource "azurerm_role_assignment" "ado_service_connection_bv" {
 resource "azurerm_role_assignment" "backup_vault_storage_account_backup_contributor" {
   for_each = local.storage_backup_targets
 
-  scope                = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/${each.value.resource_group}/providers/Microsoft.Storage/storageAccounts/${each.value.name}"
+  scope                = local.storage_backup_target_ids[each.key]
   role_definition_name = "Storage Account Backup Contributor"
   principal_id         = module.backup_vaults["cpp-backup-vault"].backup_vault_principal_id
+}
+
+# Lists all containers for ADLS entries that use containers: ["*"].
+data "azurerm_storage_containers" "adls_backup_all" {
+  for_each = { for k, sa in local.adls_backup_instances : k => sa if contains(try(sa.containers, []), "*") }
+
+  storage_account_id = local.storage_backup_target_ids[each.key]
+}
+
+# Enrol ADLS storage accounts in cpp-backup-vault. Only entries with type adls and
+# backup-enabled: true in the onboarding file are enrolled.
+#
+# The vault is immutable and locked, so enrolment is effectively permanent: backup
+# instances can't be deleted while they have recovery points. prevent_destroy stops
+# a plan from destroying or replacing an instance, for example if an entry is
+# removed or set back to backup-enabled: false. To retire one, stop protection
+# (retain data) and remove it from state with terraform state rm.
+resource "azurerm_data_protection_backup_instance_data_lake_storage" "this" {
+  for_each = local.adls_backup_instances
+
+  name                               = "${each.key}-adls-backup-instance"
+  location                           = var.location
+  data_protection_backup_vault_id    = module.backup_vaults["cpp-backup-vault"].backup_vault_id
+  storage_account_id                 = local.storage_backup_target_ids[each.key]
+  backup_policy_data_lake_storage_id = local.adls_backup_policy_ids[each.value.policy]
+  storage_container_names = (
+    contains(each.value.containers, "*")
+    ? [for c in data.azurerm_storage_containers.adls_backup_all[each.key].containers : c.name]
+    : each.value.containers
+  )
+
+  # The vault needs Storage Account Backup Contributor on the account before
+  # protection can be configured. Role assignments can take up to 30 minutes to take
+  # effect, so assign the role in an earlier apply (backup-enabled: false) first.
+  depends_on = [azurerm_role_assignment.backup_vault_storage_account_backup_contributor]
+
+  lifecycle {
+    prevent_destroy = true
+
+    precondition {
+      condition     = contains(keys(local.adls_backup_policy_ids), try(each.value.policy, ""))
+      error_message = "${each.key}: policy must be one of the vault's ADLS policies (${join(", ", keys(local.adls_backup_policy_ids))})."
+    }
+
+    precondition {
+      condition     = length(try(each.value.containers, [])) > 0
+      error_message = "${each.key}: containers must list at least one container, or \"*\" for all."
+    }
+  }
 }
 
 
