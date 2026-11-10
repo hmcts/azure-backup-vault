@@ -67,3 +67,199 @@
   backup-enabled: false
   policy: null
   containers: []
+
+- name: adosclivetfstate
+  resource_group: azure-devops-service-connections-tfstate-live-rg
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: sampddmz01
+  resource_group: RG-MPD-DMZ-01
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: sampdshared01
+  resource_group: RG-MPD-SHARED-01
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccm01
+  resource_group: RG-PRD-CCM-01
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccm01backupfiles
+  resource_group: RG-PRD-INT-01
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccm01bulkscanfailed
+  resource_group: rg-prd-ccm01-bulkscan
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccm01bulkscaninbox
+  resource_group: rg-prd-ccm01-bulkscan
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccm01bulkscanmngr
+  resource_group: rg-prd-ccm01-bulkscan
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccm01essnap
+  resource_group: RG-PRD-SVC-01
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccm01stagingdlrm
+  resource_group: rg-prd-ccm01-stagingdlrm
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccp0101hearingres
+  resource_group: RG-PRD-CCP0101-HEARINGRES
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccp0101notifyattfa
+  resource_group: RG-PRD-CCP0101-NOTIFYATT
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccp0102laafa
+  resource_group: RG-PRD-CCP0102-LEGALAIDAGENCY
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccp01funcdata
+  resource_group: RG-PRD-CCP0101-HEARINGRES
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccp01nowsce
+  resource_group: RG-PRD-CCP0101-HEARINGRES
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccp01nowscecomplex
+  resource_group: RG-PRD-CCP0101-HEARINGRES
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccr01
+  resource_group: RG-PRD-SVC-01
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdcppauditreports
+  resource_group: RG-PRD-CCP-AUDIT
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprddcs
+  resource_group: RG-PRD-SVC-01
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdfilestore
+  resource_group: RG-PRD-SVC-01
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdidam01
+  resource_group: RG-PRD-IDM1-OPS-01
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdlargefiles
+  resource_group: RG-PRD-LARGEFILES
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdrefdataoffences
+  resource_group: RG-PRD-CCM-REFDATAOFFENCES
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccp0101blksfa
+  resource_group: RG-PRD-CCP0101-BULKSCAN
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccp0101csflfa
+  resource_group: RG-PRD-CCP0101-CASEFILTER
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccm01bulkscan
+  resource_group: rg-prd-ccm01-bulkscan
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdccm01airagfa
+  resource_group: rg-prd-ccm01-airag
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
+
+- name: saprdarchiving
+  resource_group: RG-PRD-ARCHIVING
+  type: blob
+  backup-enabled: false
+  policy: null
+  containers: []
