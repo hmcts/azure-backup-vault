@@ -36,6 +36,11 @@ variable "backup_vaults" {
     enable_postgresql_test_policy    = optional(bool, true)
     enable_adls_crit4_5_policy       = optional(bool, false)
     enable_adls_test_policy          = optional(bool, false)
+    enable_blob_crit4_5_policy       = optional(bool, false)
+    enable_blob_test_policy          = optional(bool, false)
+
+    blob_crit4_5_backup_schedule = optional(string, "R/2026-11-09T02:00:00+00:00/P1D")
+    blob_test_backup_schedule    = optional(string, "R/2026-11-09T03:00:00+00:00/P1D")
 
     # Postgres Crit4/5 Policy Configuration
     crit4_5_backup_schedule            = optional(string, "R/2024-01-07T02:00:00+00:00/P1W")
