@@ -53,6 +53,20 @@ locals {
     ] : p[0] => p[1] if p[0] != null
   }
 
+  # Blob accounts to enrol: type blob with backup-enabled set to true.
+  blob_backup_instances = {
+    for k, sa in local.storage_backup_targets : k => sa
+    if try(sa.type, "") == "blob" && try(sa["backup-enabled"], false) == true
+  }
+
+  # Blob backup policies in cpp-backup-vault, keyed by policy name (e.g. blob-test).
+  blob_backup_policy_ids = {
+    for p in [
+      [module.backup_vaults["cpp-backup-vault"].blob_crit4_5_policy_name, module.backup_vaults["cpp-backup-vault"].blob_crit4_5_policy_id],
+      [module.backup_vaults["cpp-backup-vault"].blob_test_policy_name, module.backup_vaults["cpp-backup-vault"].blob_test_policy_id],
+    ] : p[0] => p[1] if p[0] != null
+  }
+
   # Common tags for HMCTS resources
   common_tags = {
     for k, v in {
