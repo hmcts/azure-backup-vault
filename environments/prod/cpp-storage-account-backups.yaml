@@ -41,12 +41,11 @@
 
 # --- Blob backup restore test (PRP, temporary) ------------------------------------
 
-# Test source account. Set backup-enabled: true in a follow-up PR, after this one
-# has applied and the role has taken effect.
+# Test source account, enrolled with the 7-day blob-test policy.
 - name: saprpbkpblobtest01
   resource_group: RG-PRP-SVC-01
   type: blob
-  backup-enabled: false
+  backup-enabled: true
   policy: blob-test
   containers:
     - backup-test-01
