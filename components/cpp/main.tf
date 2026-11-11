@@ -187,3 +187,44 @@ resource "azurerm_data_protection_backup_instance_data_lake_storage" "adls" {
 }
 
 
+
+data "azurerm_storage_containers" "blob_backup_all" {
+  for_each = { for k, sa in local.blob_backup_instances : k => sa if contains(try(sa.containers, []), "*") }
+
+  storage_account_id = data.azurerm_storage_account.storage_backup_targets[each.key].id
+}
+
+# Enrol blob storage accounts in cpp-backup-vault (operational and vaulted backup).
+# Only entries with type blob and backup-enabled: true are enrolled. Same rules as
+# the ADLS instances above: enrolment is effectively permanent, and the role must be
+# assigned in an earlier apply.
+resource "azurerm_data_protection_backup_instance_blob_storage" "blob" {
+  for_each = local.blob_backup_instances
+
+  name               = "${each.key}-blob-backup-instance"
+  location           = var.location
+  vault_id           = module.backup_vaults["cpp-backup-vault"].backup_vault_id
+  storage_account_id = data.azurerm_storage_account.storage_backup_targets[each.key].id
+  backup_policy_id   = local.blob_backup_policy_ids[each.value.policy]
+  storage_account_container_names = (
+    contains(each.value.containers, "*")
+    ? [for c in data.azurerm_storage_containers.blob_backup_all[each.key].containers : c.name]
+    : each.value.containers
+  )
+
+  depends_on = [azurerm_role_assignment.backup_vault_storage_account_backup_contributor]
+
+  lifecycle {
+    prevent_destroy = true
+
+    precondition {
+      condition     = contains(keys(local.blob_backup_policy_ids), try(each.value.policy, ""))
+      error_message = "${each.key}: policy must be one of the vault's blob policies (${join(", ", keys(local.blob_backup_policy_ids))})."
+    }
+
+    precondition {
+      condition     = length(try(each.value.containers, [])) > 0
+      error_message = "${each.key}: containers must list at least one container, or \"*\" for all."
+    }
+  }
+}
