@@ -62,51 +62,31 @@
 
 # --- Production -------------------------------------------------------------------
 
-- name: saprdforensicaudit2
-  resource_group: rg-prd-ccm01-forensicauditreporting
-  type: adls
-  backup-enabled: false
-  policy: null
-  containers: []
-
 - name: saprdccm01alfresco
   resource_group: RG-PRD-CCM-01
   type: adls
-  backup-enabled: false
-  policy: null
-  containers: []
+  backup-enabled: true
+  policy: adls-crit4-5
+  containers: ["*"]
 
 - name: saprdccm01misdp
   resource_group: RG-PRD-SVC-01
   type: adls
-  backup-enabled: false
-  policy: null
-  containers: []
-
-- name: saprdccm01mislivereport
-  resource_group: RG-PRD-SVC-01
-  type: adls
-  backup-enabled: false
-  policy: null
-  containers: []
+  backup-enabled: true
+  policy: adls-crit4-5
+  containers: ["*"]
 
 - name: saprdcourtlistpublisher
   resource_group: RG-PRD-SVC-01
   type: adls
-  backup-enabled: false
-  policy: null
-  containers: []
+  backup-enabled: true
+  policy: adls-crit4-5
+  containers: ["*"]
 
 - name: saprdforensicaudit
   resource_group: RG-PRD-CCM-DATALAKE
   type: adls
-  backup-enabled: false
-  policy: null
-  containers: []
-
-- name: sampdappgatewaycerts
-  resource_group: RG-MLV-INT-01
-  type: adls
+  # Remaining non-enabled since until size is reduced
   backup-enabled: false
   policy: null
   containers: []
@@ -114,9 +94,9 @@
 - name: sampdpgreports
   resource_group: RG-PRD-SVC-01
   type: adls
-  backup-enabled: false
-  policy: null
-  containers: []
+  backup-enabled: true
+  policy: adls-crit4-5
+  containers: ["*"]
 
 - name: adosclivetfstate
   resource_group: azure-devops-service-connections-tfstate-live-rg
