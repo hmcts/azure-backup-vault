@@ -67,21 +67,21 @@
   type: adls
   backup-enabled: true
   policy: null
-  containers: []
+  containers: ["*"]
 
 - name: saprdccm01misdp
   resource_group: RG-PRD-SVC-01
   type: adls
   backup-enabled: true
   policy: null
-  containers: []
+  containers: ["*"]
 
 - name: saprdcourtlistpublisher
   resource_group: RG-PRD-SVC-01
   type: adls
   backup-enabled: true
   policy: null
-  containers: []
+  containers: ["*"]
 
 - name: saprdforensicaudit
   resource_group: RG-PRD-CCM-DATALAKE
@@ -96,7 +96,7 @@
   type: adls
   backup-enabled: true
   policy: null
-  containers: []
+  containers: ["*"]
 
 - name: adosclivetfstate
   resource_group: azure-devops-service-connections-tfstate-live-rg
