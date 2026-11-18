@@ -66,21 +66,21 @@
   resource_group: RG-PRD-CCM-01
   type: adls
   backup-enabled: true
-  policy: null
+  policy: adls-crit4-5
   containers: ["*"]
 
 - name: saprdccm01misdp
   resource_group: RG-PRD-SVC-01
   type: adls
   backup-enabled: true
-  policy: null
+  policy: adls-crit4-5
   containers: ["*"]
 
 - name: saprdcourtlistpublisher
   resource_group: RG-PRD-SVC-01
   type: adls
   backup-enabled: true
-  policy: null
+  policy: adls-crit4-5
   containers: ["*"]
 
 - name: saprdforensicaudit
@@ -95,7 +95,7 @@
   resource_group: RG-PRD-SVC-01
   type: adls
   backup-enabled: true
-  policy: null
+  policy: adls-crit4-5
   containers: ["*"]
 
 - name: adosclivetfstate
