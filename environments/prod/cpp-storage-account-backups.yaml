@@ -47,9 +47,7 @@
   type: blob
   backup-enabled: true
   policy: blob-test
-  containers:
-    - backup-test-01
-    - backup-test-02
+  containers: ["*"]
 
 # Restore target for the vaulted restore test. Never enrol: it only needs the role so
 # the vault can restore into it.
