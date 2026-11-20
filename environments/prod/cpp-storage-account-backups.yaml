@@ -13,7 +13,10 @@
 #                   permanent: the vault is immutable and locked.
 #   policy:         backup policy name, e.g. adls-test, adls-crit4-5, blob-test or blob-crit4-5
 #   containers:     containers to back up, or ["*"] for all (quote the *, YAML
-#                   treats a bare * as an alias)
+#                   treats a bare * as an alias). For blob accounts, "*" skips containers matching
+#                   backup_container_exclude_patterns in components/cpp/locals.tf
+#                   (boot diagnostics, insights-*, azure-webjobs-hosts/secrets).
+#                   Explicit lists are not filtered.
 #
 # Add an account with backup-enabled: false first and apply, so the role is in place
 # (it can take up to 30 minutes to take effect) before enrolling it.
@@ -146,15 +149,7 @@
   type: blob
   backup-enabled: true
   policy: blob-crit4-5
-  containers:
-    - courtpublisher-blob-container
-    - insights-metrics-pt1m
-    - prdccm01-es-backups
-    - prdccm01amsbk02cpcjshmctsnet-79623003913e4c8c887d26b7f9e495f8
-    - prdwafbackup
-    - report-files
-    - schedulelistinginput
-    - schedulelistingoutput
+  containers: ["*"]
 
 - name: saprdccm01backupfiles
   resource_group: RG-PRD-INT-01
