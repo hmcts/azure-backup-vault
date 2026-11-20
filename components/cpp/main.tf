@@ -208,7 +208,10 @@ resource "azurerm_data_protection_backup_instance_blob_storage" "blob" {
   backup_policy_id   = local.blob_backup_policy_ids[each.value.policy]
   storage_account_container_names = (
     contains(each.value.containers, "*")
-    ? [for c in data.azurerm_storage_containers.blob_backup_all[each.key].containers : c.name]
+    ? [
+      for c in data.azurerm_storage_containers.blob_backup_all[each.key].containers : c.name
+      if !anytrue([for p in local.backup_container_exclude_patterns : length(regexall(p, c.name)) > 0])
+    ]
     : each.value.containers
   )
 

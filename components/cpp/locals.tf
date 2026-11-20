@@ -38,6 +38,16 @@ locals {
     for sa in yamldecode(file("${path.module}/${var.storage_account_backup_onboarding_file}")) : sa.name => sa
   }
 
+  # Regex patterns for blob containers that are never backed up when an entry uses
+  # containers: ["*"]. Explicitly listed containers are not filtered. Not applied to ADLS.
+  backup_container_exclude_patterns = [
+    "^bootdiagnostics-",
+    "^insights-",
+    "^azure-webjobs-hosts$",
+    "-applease$",
+    "-leases$",
+  ]
+
   # ADLS accounts to enrol: type adls with backup-enabled set to true.
   adls_backup_instances = {
     for k, sa in local.storage_backup_targets : k => sa
