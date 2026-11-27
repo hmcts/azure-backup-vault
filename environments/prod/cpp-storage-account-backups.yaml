@@ -122,6 +122,13 @@
   policy: blob-crit4-5
   containers: ["*"]
 
+- name: sampdngfconfigbkp01
+  resource_group: RG-MLV-INT-01
+  type: blob
+  backup-enabled: true
+  policy: blob-crit4-5
+  containers: ["*"]
+
 # Explicit container list (not "*"): most containers in this account are boot diagnostics.
 # New containers created here must be enrolled by adding them to this list.
 - name: saprdccm01
